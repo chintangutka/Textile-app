@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Textile Stock Manager</title>
+<link rel="manifest" href="manifest.json"/>
+<meta name="theme-color" content="#C17A28"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="TextileApp"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{--bg:#F3EEE5;--sb:#16100C;--acc:#C17A28;--acl:#F0C98A;--acd:#9A6018;--wh:#FFFFFF;--bd:#DDD4C2;--bdl:#EAE3D6;--tx:#1A120A;--mu:#7A6A58;--ok:#2E7D4F;--okb:#EAF7EF;--wn:#9A6018;--wnb:#FDF3E0;--er:#C0392B;--erb:#FDECEA;--in:#1A5C8C;--inb:#E8F3FB;--r:8px;--rl:12px;--nh:60px;--sb2:env(safe-area-inset-bottom,0px)}
+html,body{height:100%;font-family:"DM Sans",sans-serif;font-size:14px;color:var(--tx);background:var(--bg);overscroll-behavior:none}
+.app{display:flex;height:100vh;overflow:hidden}
+/* Sidebar */
+.side{width:220px;min-width:220px;background:var(--sb);display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0}
+.logo{padding:16px;border-bottom:1px solid rgba(255,255,255,.07)}
+.logo-name{font-family:"DM Serif Display",serif;font-size:15px;color:var(--acl);line-height:1.3}
+.logo-sub{font-size:10px;color:rgba(255,255,255,.28);letter-uppercase;text-transform:uppercase;letter-spacing:.07em;margin-top:2px}
+.ns{padding:10px 8px 2px;font-size:10px;color:rgba(255,255,255,.25);text-transform:uppercase;letter-spacing:.1em;font-weight:500}
+.ni{display:flex;align-items:center;gap:9px;padding:8px 12px;margin:1px 6px;border-radius:6px;cursor:pointer;color:rgba(255,255,255,.5);font-size:13px;border:none;background:none;width:calc(100% - 12px);text-align:left;font-family:"DM Sans",sans-serif;transition:all .15s}
+.ni:hover{background:#231811;color:rgba(255,255,255,.9)}
+.ni.on{background:#3D2B1F;color:var(--acl);font-weight:500}
+.ni-ic{font-size:14px;width:16px;text-align:center;flex-shrink:0}
+.nb{background:var(--er);color:#fff;font-size:10px;font-weight:600;border-radius:10px;padding:1px 6px;margin-left:auto}
+.sfoot{padding:10px 12px;border-top:1px solid rgba(255,255,255,.07);margin-top:auto}
+.cdot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
+.cok{background:#4CAF7D}.cerr{background:#E57373}.cpend{background:#FFB74D;animation:bl 1s infinite}
+@keyframes bl{0%,100%{opacity:1}50%{opacity:.3}}
+/* Main */
+.main{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-width:0}
+.strip{height:3px;flex-shrink:0}
+.strip.r{background:#1A3A5C}.strip.s{background:#8B1A1A}
+.tbar{background:var(--wh);border-bottom:1px solid var(--bd);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20;flex-shrink:0;gap:10px}
+.tbar-title{font-family:"DM Serif Display",serif;font-size:17px}
+.fsw{display:flex;border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;flex-shrink:0}
+.fb{padding:5px 10px;font-size:11px;font-weight:500;cursor:pointer;border:none;background:var(--wh);color:var(--mu);font-family:"DM Sans",sans-serif;transition:all .15s}
+.fb.r{background:#1A3A5C;color:#fff}.fb.s{background:#8B1A1A;color:#fff}
+.fb:not(:last-child){border-right:1px solid var(--bd)}
+.body{padding:14px 16px;flex:1;padding-bottom:calc(var(--nh) + var(--sb2) + 8px)}
+/* Bottom nav */
+.bnav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--wh);border-top:1px solid var(--bd);z-index:30;padding-bottom:var(--sb2)}
+.bni{display:flex;align-items:stretch;height:var(--nh)}
+.bnt{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;border:none;background:none;color:var(--mu);font-family:"DM Sans",sans-serif;font-size:9px;font-weight:500;position:relative;padding:4px}
+.bnt.on{color:var(--acc)}
+.bni-ic{font-size:18px;line-height:1}
+.bnt-b{position:absolute;top:5px;right:calc(50% - 14px);background:var(--er);color:#fff;font-size:9px;font-weight:600;border-radius:10px;padding:1px 5px}
+/* Drawer */
+.dov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:40}
+.dov.op{display:block}
+.drw{position:fixed;bottom:0;left:0;right:0;background:var(--wh);border-radius:16px 16px 0 0;z-index:50;padding:0 0 calc(var(--sb2)+8px);transform:translateY(100%);transition:transform .25s}
+.drw.op{transform:translateY(0)}
+.dh{width:40px;height:4px;background:var(--bd);border-radius:2px;margin:12px auto 12px}
+.dt{font-size:12px;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.07em;padding:0 16px 8px}
+.di{display:flex;align-items:center;gap:12px;padding:12px 20px;cursor:pointer;font-size:14px;color:var(--tx);border:none;background:none;width:100%;font-family:"DM Sans",sans-serif}
+.di.on{color:var(--acc);font-weight:500}
+.di-ic{font-size:18px;width:24px;text-align:center}
+/* Cards */
+.card{background:var(--wh);border:1px solid var(--bd);border-radius:var(--rl);padding:14px;margin-bottom:12px}
+.chd{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:6px}
+.ct{font-size:11px;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.07em}
+/* Alert cards */
+.ac{border-radius:var(--rl);padding:12px 14px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start}
+.ac.cr{background:var(--erb);border:1px solid #F5C6C6}
+.ac.wn{background:var(--wnb);border:1px solid #F0C98A}
+.ac-ic{font-size:20px;flex-shrink:0}
+.ac-t{font-size:13px;font-weight:500;margin-bottom:2px}
+.ac-s{font-size:12px;color:var(--mu)}
+/* Sumbar */
+.smb{border-radius:var(--rl);padding:12px 14px;margin-bottom:12px;display:flex;align-items:stretch;overflow-x:auto}
+.smb.r{background:linear-gradient(135deg,#1A3A5C,#0D1F33)}
+.smb.s{background:linear-gradient(135deg,#5C1A1A,#330D0D)}
+.si{flex:1;min-width:60px;text-align:center;padding:0 3px}
+.sl{font-size:9px;color:rgba(240,201,138,.65);text-transform:uppercase;letter-spacing:.06em}
+.sv{font-family:"DM Mono",monospace;font-size:14px;color:var(--acl);font-weight:500;margin-top:3px}
+.su{font-size:9px;opacity:.6;margin-left:2px}
+.sdv{width:1px;background:rgba(255,255,255,.1);margin:0 4px;align-self:stretch;flex-shrink:0}
+/* Grid */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+/* Forms */
+.fr{display:grid;gap:8px;margin-bottom:8px}
+.fr.c2{grid-template-columns:1fr 1fr}
+.fr.c3{grid-template-columns:1fr 1fr 1fr}
+.fr.c4{grid-template-columns:repeat(4,1fr)}
+.fld{display:flex;flex-direction:column;gap:3px}
+label{font-size:10px;font-weight:500;color:var(--mu);letter-spacing:.04em;text-transform:uppercase}
+input,select,textarea{width:100%;padding:7px 10px;font-size:13px;font-family:"DM Sans",sans-serif;border:1px solid var(--bd);border-radius:var(--r);background:var(--wh);color:var(--tx);outline:none;transition:border-color .15s;height:36px;-webkit-appearance:none;appearance:none}
+input:focus,select:focus{border-color:var(--acc)}
+textarea{resize:vertical;height:54px}
+select{cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237A6A58' stroke-width='1.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 9px center;padding-right:26px}
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;font-size:13px;font-family:"DM Sans",sans-serif;font-weight:500;border:1px solid var(--bd);border-radius:var(--r);cursor:pointer;background:var(--wh);color:var(--tx);height:36px;white-space:nowrap}
+.btn-p{background:var(--acc);color:#fff;border-color:var(--acc)}
+.btn-p:hover{background:var(--acd)}
+.btn-full{width:100%;justify-content:center;height:44px;font-size:15px}
+.btn-sm{padding:3px 9px;font-size:12px;height:26px}
+.btn-del{color:var(--er);border-color:#F5C6C6}
+.btn-pr{color:var(--in);border-color:#BDD8ED}
+.btn-xl{color:var(--ok);border-color:#B8E5CB}
+.bgrp{display:flex;gap:6px;flex-wrap:wrap}
+/* Tables */
+.tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:12px;min-width:400px}
+th{text-align:left;padding:7px 10px;font-size:10px;font-weight:600;color:var(--mu);border-bottom:1px solid var(--bd);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;background:var(--bg)}
+td{padding:7px 10px;border-bottom:1px solid var(--bdl);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#FDFAF5}
+/* Badges */
+.bdg{display:inline-block;padding:2px 7px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap}
+.bi{background:var(--inb);color:var(--in)}
+.bo{background:var(--okb);color:var(--ok)}
+.bw{background:var(--wnb);color:var(--wn)}
+.be{background:var(--erb);color:var(--er)}
+.ba{background:#FDF3E0;color:var(--acd)}
+/* Chips */
+.ch{display:inline-flex;align-items:center;gap:3px;background:#F0EDE8;border:1px solid var(--bd);border-radius:20px;padding:2px 8px;font-size:11px;margin:2px}
+.chx{background:none;border:none;cursor:pointer;color:var(--mu);font-size:13px;padding:0 0 0 3px}
+/* Report card */
+.rc{background:var(--wh);border:1px solid var(--bd);border-radius:var(--rl);padding:12px 14px;margin-bottom:8px}
+.rc-n{font-weight:500;font-size:13px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.rc-r{display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid var(--bdl)}
+.rc-r:last-child{border:none}
+.rc-l{color:var(--mu)}
+/* Misc */
+.ml-i{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:var(--r);border:1px solid var(--bdl);margin-bottom:6px;background:var(--wh)}
+.addr{display:flex;gap:7px;margin-bottom:9px}
+.addr input{flex:1}
+.pbcard{background:var(--wh);border:1px solid var(--bd);border-radius:var(--rl);padding:12px 14px;margin-bottom:8px}
+.pbname{font-weight:500;font-size:13px;margin-bottom:8px;display:flex;align-items:center;gap:7px}
+.pbrow{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:4px 0;border-bottom:1px solid var(--bdl)}
+.pbrow:last-child{border:none}
+.sbr{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.sbr input{flex:1;min-width:130px;height:34px}
+.sbr select{height:34px}
+.empty{text-align:center;padding:28px 20px;color:var(--mu)}
+.ei{font-size:28px;margin-bottom:8px;opacity:.35}
+.al{padding:9px 12px;border-radius:var(--r);font-size:13px;margin-bottom:10px;display:flex;align-items:center;gap:7px}
+.alo{background:var(--okb);color:var(--ok);border:1px solid #B8E5CB}
+.ale{background:var(--erb);color:var(--er);border:1px solid #F5C6C6}
+.mn{font-family:"DM Mono",monospace}
+.fw5{font-weight:500}
+.tm{color:var(--mu)}
+.lp{color:var(--ok);font-weight:500;font-family:"DM Mono",monospace}
+.ln{color:var(--er);font-weight:500;font-family:"DM Mono",monospace}
+.tagr{display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap}
+.tagr select,.tagr input{flex:1;min-width:80px}
+.tags{display:flex;flex-wrap:wrap;gap:2px;min-height:22px}
+.load{display:flex;align-items:center;justify-content:center;height:100vh;background:var(--bg);flex-direction:column;gap:12px}
+.spin{width:30px;height:30px;border:3px solid var(--bd);border-top-color:var(--acc);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media(max-width:768px){.side{display:none}.bnav{display:block}.g2,.g3{grid-template-columns:1fr 1fr}.fr.c3,.fr.c4{grid-template-columns:1fr 1fr}.body{padding:12px;padding-bottom:calc(var(--nh) + var(--sb2) + 12px)}}
+@media(max-width:400px){.g2,.g3{grid-template-columns:1fr}.fr.c2,.fr.c3,.fr.c4{grid-template-columns:1fr}}
+@media print{.side,.tbar,.bnav,.btn,.fsw,.dov,.drw,.no-print{display:none!important}.body{padding:0}}
+</style>
+</head>
+<body>
+<div id="r"></div>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+const {useState,useEffect,useMemo}=React,h=React.createElement;
+const uid=()=>Math.random().toString(36).substr(2,9);
+const today=()=>new Date().toISOString().split("T")[0];
+const fmt=n=>Number(n||0).toLocaleString("en-IN");
+const fmtD=d=>{if(!d)return"";const[y,m,da]=d.split("-");return da+"-"+"Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec".split(",")[+m-1]+"-"+y};
+const daysAgo=d=>{if(!d)return 0;return Math.floor((Date.now()-new Date(d))/(864e5))};
+const FIRMS={rajesh:{id:"rajesh",name:"Rajesh Textiles"},sn:{id:"sn",name:"SN Textiles"}};
+
+function csvDL(name,hdr,rows){
+  const c=[hdr,...rows].map(r=>r.map(x=>'"'+String(x||"").replace(/"/g,'""')+'"').join(",")).join("\n");
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+c],{type:"text/csv;charset=utf-8"}));a.download=name+".csv";a.click();
+}
+function prnt(firm,title,hdr,rows){
+  const w=window.open("","_blank");
+  w.document.write("<!DOCTYPE html><html><head><title>"+title+"</title><style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px}h2{font-size:17px;margin-bottom:2px}p{color:#666;font-size:11px;margin-bottom:14px}table{width:100%;border-collapse:collapse}th{background:#f5f0e8;text-align:left;padding:6px 8px;border:1px solid #ddd;font-size:10px;text-transform:uppercase}td{padding:6px 8px;border:1px solid #eee}tr:nth-child(even) td{background:#fdfaf5}</style></head><body><h2>"+firm+"</h2><p>"+title+" &middot; "+new Date().toLocaleString("en-IN")+"</p><table><thead><tr>"+hdr.map(x=>"<th>"+x+"</th>").join("")+"</tr></thead><tbody>"+rows.map(r=>"<tr>"+r.map(x=>"<td>"+(x||"&mdash;")+"</td>").join("")+"</tr>").join("")+"</tbody></table></body></html>");
+  w.document.close();setTimeout(()=>w.print(),400);
+}
+
+// Firebase
+let db=null;
+function initFB(){
+  try{
+    if(firebase.apps.length)firebase.apps.forEach(a=>{try{a.delete();}catch{}});
+    db=firebase.firestore(firebase.initializeApp({apiKey:"AIzaSyAPbkwV535-qjBZaIB6AlZ9KrhbLOe0_ZQ",authDomain:"yarn-stock-36d41.firebaseapp.com",projectId:"yarn-stock-36d41",storageBucket:"yarn-stock-36d41.firebasestorage.app",messagingSenderId:"1077808330848",appId:"1:1077808330848:web:e98d078eee90897f7f2b05"}));
+    return true;
+  }catch(e){console.error(e);return false;}
+}
+const fc=(fid,col)=>db.collection("firms").doc(fid).collection(col);
+const dbs=async(fid,col,id,data)=>fc(fid,col).doc(id).set({...data,_id:id,_ts:new Date().toISOString()});
+const dbd=async(fid,col,id)=>fc(fid,col).doc(id).delete();
+const dbl=(fid,col,cb)=>fc(fid,col).orderBy("_ts","asc").onSnapshot(s=>cb(s.docs.map(d=>d.data())),e=>console.error(e));
+const mSave=async(fid,data)=>db.collection("firms").doc(fid).collection("masters").doc("config").set(data);
+const mListen=(fid,cb)=>db.collection("firms").doc(fid).collection("masters").doc("config").onSnapshot(s=>{if(s.exists)cb(s.data());});
+
+const DEF={
+  yarnTypes:["40s Cotton","60s Cotton","50s Cotton","40 PV","2/40s Cotton TFO","2/60s Cotton TFO","50/50 PC","2/30s Cotton","80s Cotton","30s Cotton"],
+  godowns:["Mill A","Mill B","Own Godown","Supplier X","Supplier Y"],
+  weavers:["Ramesh Weaver","Suresh Loom","Karim Handloom","Ganesh Fabrics"],
+  sizers:["Patel Sizing","Kumar Doubler","Singh Warp Prep"],
+  yarnRates:{},yarnMinStock:{},pendingDays:15
+};
+
+// Root
+function Root(){
+  const[ok,setOk]=useState(false),[err,setErr]=useState("");
+  useEffect(()=>{if(initFB())setOk(true);else setErr("Cannot connect. Check internet.");},[]);
+  if(err)return h("div",{className:"load"},h("p",{style:{color:"var(--er)",textAlign:"center"}},err),h("button",{className:"btn btn-p",style:{marginTop:12},onClick:()=>location.reload()},"Retry"));
+  if(!ok)return h("div",{className:"load"},h("div",{className:"spin"}),h("p",{className:"tm",style:{fontSize:13}},"Connecting..."));
+  return h(App,null);
+}
+
+// App
+function App(){
+  const[page,setPage]=useState("dash");
+  const[firm,setFirm]=useState(()=>localStorage.getItem("tsm_f")||"rajesh");
+  const[conn,setConn]=useState("pend");
+  const[toast,setT]=useState(null);
+  const[drawer,setDr]=useState(false);
+  const[M,setM]=useState(DEF);
+  const[inw,setInw]=useState([]);
+  const[iss,setIss]=useState([]);
+  const[bms,setBms]=useState([]);
+  const[trf,setTrf]=useState([]);
+  const[fab,setFab]=useState([]);
+
+  const toast2=(msg,type="ok")=>{setT({msg,type});setTimeout(()=>setT(null),3000)};
+  const go=(p)=>{setPage(p);setDr(false)};
+  const swf=(f)=>{setFirm(f);localStorage.setItem("tsm_f",f)};
+
+  useEffect(()=>{
+    const u=[];setM(DEF);setInw([]);setIss([]);setBms([]);setTrf([]);setFab([]);setConn("pend");
+    try{
+      u.push(mListen(firm,d=>{setM({...DEF,...d});setConn("ok")}));
+      db.collection("firms").doc(firm).collection("masters").doc("config").get().then(s=>{if(!s.exists)mSave(firm,DEF)});
+      const L=(c,s)=>dbl(firm,c,d=>{s(d);setConn("ok")});
+      u.push(L("inward",setInw));u.push(L("issues",setIss));u.push(L("beams",setBms));u.push(L("transfers",setTrf));u.push(L("fabric",setFab));
+    }catch(e){setConn("err")}
+    return()=>u.forEach(x=>x&&x());
+  },[firm]);
+
+  const updM=async(k,v)=>{const u={...M,[k]:v};setM(u);await mSave(firm,u)};
+  const parties=[...M.weavers.map(w=>({name:w,type:"weaver"})),...M.sizers.map(s=>({name:s,type:"sizer"}))];
+
+  const yBal=useMemo(()=>{
+    const b={};
+    inw.forEach(r=>{const k=r.yarnType+"||"+r.godown;b[k]=(b[k]||0)+(+r.totalKg||0)});
+    iss.forEach(r=>{const k=r.yarnType+"||"+r.godown;b[k]=(b[k]||0)-(+r.qty||0)});
+    return b;
+  },[inw,iss]);
+
+  const yBalT=useMemo(()=>{const b={};Object.entries(yBal).forEach(([k,v])=>{const[yt]=k.split("||");b[yt]=(b[yt]||0)+v});return b},[yBal]);
+
+  const pBal=useMemo(()=>{
+    const b={};
+    const add=(p,yt,q)=>{if(!b[p])b[p]={};b[p][yt]=(b[p][yt]||0)+q};
+    iss.forEach(r=>add(r.issuedTo,r.yarnType,+r.qty||0));
+    trf.forEach(r=>{add(r.fromParty,r.yarnType,-(+r.qty||0));add(r.toParty,r.yarnType,+r.qty||0)});
+    return b;
+  },[iss,trf]);
+
+  const alerts=useMemo(()=>{
+    const list=[];
+    M.yarnTypes.forEach(yt=>{
+      const min=+(M.yarnMinStock||{})[yt]||0;
+      if(min>0){const bal=yBalT[yt]||0;if(bal<min)list.push({type:"stock",level:bal<=0?"cr":"wn",title:"Low stock: "+yt,sub:"Balance: "+fmt(bal)+" Kg  Min: "+fmt(min)+" Kg"})}
+    });
+    const thr=+(M.pendingDays)||15;
+    bms.forEach(b=>{
+      if(!["Fabric received","Closed"].includes(b.status)){
+        const d=daysAgo(b.date);if(d>=thr)list.push({type:"beam",level:d>thr*2?"cr":"wn",title:"Pending beam: "+b.beamNo,sub:b.weaver+" · "+b.designNo+" · "+d+" days · "+b.status})
+      }
+    });
+    return list;
+  },[M,yBalT,bms]);
+
+  const stockVal=useMemo(()=>{let v=0;Object.entries(yBal).forEach(([k,q])=>{const[yt]=k.split("||");v+=q*((M.yarnRates||{})[yt]||0)});return v},[yBal,M]);
+
+  const nav=[
+    {id:"dash",l:"Dashboard",ic:"⊞",g:"Overview"},
+    {id:"alerts",l:"Alerts",ic:"🔔",g:"Overview",badge:alerts.length},
+    {id:"inw",l:"Yarn Inward",ic:"↓",g:"Transactions"},
+    {id:"iss",l:"Issue Yarn",ic:"↗",g:"Transactions"},
+    {id:"bms",l:"Beam Register",ic:"▦",g:"Transactions"},
+    {id:"trf",l:"Yarn Transfer",ic:"⇄",g:"Transactions"},
+    {id:"fab",l:"Fabric Received",ic:"≋",g:"Transactions"},
+    {id:"led",l:"Stock Ledger",ic:"≡",g:"Reports"},
+    {id:"par",l:"Party Ledger",ic:"◈",g:"Reports"},
+    {id:"rep",l:"Performance",ic:"📊",g:"Reports"},
+    {id:"mas",l:"Masters",ic:"⚙",g:"Settings"}
+  ];
+  const ttls={dash:"Dashboard",alerts:"Alerts",inw:"Yarn Inward",iss:"Issue Yarn",bms:"Beam Register",trf:"Yarn Transfer",fab:"Fabric Received",led:"Stock Ledger",par:"Party Ledger",rep:"Performance",mas:"Masters"};
+  const ctx={firm,M,parties,inw,iss,bms,trf,fab,yBal,yBalT,pBal,alerts,stockVal,toast2,updM,fname:FIRMS[firm].name};
+  const PGS={dash:PDash,alerts:PAlerts,inw:PInw,iss:PIss,bms:PBms,trf:PTrf,fab:PFab,led:PLed,par:PPar,rep:PRep,mas:PMas};
+  const P=PGS[page]||PDash;
+
+  const bn=[{id:"dash",ic:"⊞",l:"Home"},{id:"alerts",ic:"🔔",l:"Alerts",badge:alerts.length},{id:"inw",ic:"↓",l:"Inward"},{id:"fab",ic:"≋",l:"Fabric"}];
+  const drItems=nav.filter(n=>!bn.find(b=>b.id===n.id));
+
+  return h("div",{className:"app"},
+    h("aside",{className:"side"},
+      h("div",{className:"logo"},h("div",{className:"logo-name"},FIRMS[firm].name),h("div",{className:"logo-sub"},"Yarn & Fabric Stock")),
+      ["Overview","Transactions","Reports","Settings"].map(g=>h("div",{key:g},
+        h("div",{className:"ns"},g),
+        nav.filter(n=>n.g===g).map(n=>h("button",{key:n.id,className:"ni"+(page===n.id?" on":""),onClick:()=>go(n.id)},
+          h("span",{className:"ni-ic"},n.ic),h("span",null,n.l),n.badge>0&&h("span",{className:"nb"},n.badge)
+        ))
+      )),
+      h("div",{className:"sfoot"},h("div",{style:{fontSize:11,color:conn==="ok"?"rgba(76,175,125,.8)":conn==="err"?"rgba(229,115,115,.8)":"rgba(255,183,77,.8)",marginBottom:6}},h("span",{className:"cdot "+(conn==="ok"?"cok":conn==="err"?"cerr":"cpend")}),conn==="ok"?"Connected · Live sync":conn==="err"?"Error":"Connecting..."))
+    ),
+    h("main",{className:"main"},
+      h("div",{className:"strip "+(firm==="rajesh"?"r":firm==="sn"?"s":"r")}),
+      h("div",{className:"tbar"},
+        h("span",{className:"tbar-title"},ttls[page]),
+        h("div",{className:"fsw"},
+          h("button",{className:"fb"+(firm==="rajesh"?" r":""),onClick:()=>swf("rajesh")},"Rajesh"),
+          h("button",{className:"fb"+(firm==="sn"?" s":""),onClick:()=>swf("sn")},"SN Textiles")
+        )
+      ),
+      h("div",{className:"body"},
+        toast&&h("div",{className:"al "+(toast.type==="ok"?"alo":"ale")},toast.type==="ok"?"✓":"✕"," ",toast.msg),
+        h(P,ctx)
+      ),
+      h("nav",{className:"bnav"},h("div",{className:"bni"},
+        bn.map(n=>h("button",{key:n.id,className:"bnt"+(page===n.id?" on":""),onClick:()=>go(n.id)},h("span",{className:"bni-ic"},n.ic),n.badge>0&&h("span",{className:"bnt-b"},n.badge),h("span",null,n.l))),
+        h("button",{className:"bnt"+(drItems.some(d=>d.id===page)?" on":""),onClick:()=>setDr(true)},h("span",{className:"bni-ic"},"☰"),h("span",null,"More"))
+      ))
+    ),
+    h("div",{className:"dov"+(drawer?" op":""),onClick:()=>setDr(false)}),
+    h("div",{className:"drw"+(drawer?" op":"")},
+      h("div",{className:"dh"}),h("div",{className:"dt"},"More"),
+      drItems.map(n=>h("button",{key:n.id,className:"di"+(page===n.id?" on":""),onClick:()=>go(n.id)},h("span",{className:"di-ic"},n.ic),h("span",null,n.l),n.badge>0&&h("span",{className:"nb",style:{marginLeft:"auto"}},n.badge)))
+    )
+  );
+}
+
+// ── DASHBOARD ──
+function PDash({firm,inw,iss,trf,fab,yBal,M,alerts,stockVal,fname}){
+  const tI=inw.reduce((a,r)=>a+(+r.totalKg||0),0),tIs=iss.reduce((a,r)=>a+(+r.qty||0),0),tF=fab.reduce((a,r)=>a+(+r.meters||0),0);
+  const rows=Object.entries(yBal).map(([k,v])=>{const[yt,gd]=k.split("||");return{yt,gd,q:v}}).filter(e=>e.q!==0).sort((a,b)=>b.q-a.q);
+  return h("div",null,
+    h("div",{className:"smb "+(firm==="rajesh"?"r":firm==="sn"?"s":"r")},
+      [{l:"Yarn In",v:fmt(tI),u:"Kg"},{l:"Issued",v:fmt(tIs),u:"Kg"},{l:"Fabric",v:fmt(tF),u:"m"},{l:"Stock Value",v:"₹"+fmt(stockVal),u:""},{l:"Alerts",v:alerts.length,u:""}]
+        .flatMap((s,i)=>[i?h("div",{key:"d"+i,className:"sdv"}):null,h("div",{key:i,className:"si"},h("div",{className:"sl"},s.l),h("div",{className:"sv"},s.v,s.u&&h("span",{className:"su"},s.u)))]).filter(Boolean)
+    ),
+    alerts.length>0&&h("div",{className:"card"},
+      h("div",{className:"chd"},h("div",{className:"ct"},"Active alerts"),h("span",{className:"bdg be"},alerts.length)),
+      alerts.slice(0,4).map((a,i)=>h("div",{key:i,className:"ac "+(a.level==="cr"?"cr":"wn")},h("div",{className:"ac-ic"},a.type==="stock"?"📦":"🧵"),h("div",null,h("div",{className:"ac-t"},a.title),h("div",{className:"ac-s"},a.sub))))
+    ),
+    h("div",{className:"card"},
+      h("div",{className:"chd"},h("div",{className:"ct"},"Yarn stock balance"),
+        h("div",{className:"bgrp"},
+          h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("stock",["Yarn","Godown","Balance Kg","Status"],rows.map(e=>[e.yt,e.gd,e.q,e.q>1000?"Good":e.q>0?"Low":"Overdrawn"]))},"⬇ Excel")
+        )
+      ),
+      rows.length===0?Em("No stock yet"):
+      h("div",{className:"tw"},h("table",null,
+        h("thead",null,h("tr",null,TH(["Yarn type","Godown","Balance","Status"]))),
+        h("tbody",null,rows.map((e,i)=>h("tr",{key:i},
+          Td(h("span",{className:"bdg bi"},e.yt)),Td(e.gd),
+          Td(h("span",{className:e.q<0?"ln":e.q>0?"lp":"tm"},fmt(Math.abs(e.q))+" Kg")),
+          Td(h("span",{className:"bdg "+(e.q>1000?"bo":e.q>0?"bw":"be")},e.q>1000?"Good":e.q>0?"Low":"Overdrawn"))
+        )))
+      ))
+    ),
+    h("div",{className:"g2"},
+      h("div",{className:"card"},h("div",{className:"ct",style:{marginBottom:8}},"Recent inward"),inw.length===0?h("p",{className:"tm",style:{fontSize:12}},"None yet"):[...inw].reverse().slice(0,4).map((r,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid var(--bdl)"}},h("div",null,h("div",{style:{fontSize:12,fontWeight:500}},r.yarnType),h("div",{className:"tm",style:{fontSize:11}},r.godown+" · "+fmtD(r.date))),h("span",{className:"mn fw5",style:{fontSize:12}},fmt(r.totalKg)+" Kg")))),
+      h("div",{className:"card"},h("div",{className:"ct",style:{marginBottom:8}},"Recent fabric"),fab.length===0?h("p",{className:"tm",style:{fontSize:12}},"None yet"):[...fab].reverse().slice(0,4).map((r,i)=>h("div",{key:i,style:{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid var(--bdl)"}},h("div",null,h("div",{style:{fontSize:12,fontWeight:500}},r.designNo+" – "+r.weaver),h("div",{className:"tm",style:{fontSize:11}},r.reed+" | "+fmtD(r.date))),h("span",{className:"mn fw5",style:{fontSize:12}},fmt(r.meters)+" m"))))
+    )
+  );
+}
+
+// ── ALERTS ──
+function PAlerts({alerts,M,updM}){
+  const cr=alerts.filter(a=>a.level==="cr"),wn=alerts.filter(a=>a.level==="wn");
+  return h("div",null,
+    h("div",{className:"card"},
+      h("div",{className:"ct",style:{marginBottom:10}},"Alert settings"),
+      h("div",{className:"fr c2"},
+        FL("Pending beam alert (days)",h("input",{type:"number",value:M.pendingDays||15,onChange:e=>updM("pendingDays",+e.target.value)})),
+        h("div",{className:"fld"},h("label",null,"Tip"),h("p",{style:{fontSize:12,color:"var(--mu)",paddingTop:8}},"Set minimum stock per yarn in Masters → Yarn types to get low stock alerts."))
+      )
+    ),
+    alerts.length===0?h("div",{className:"card"},h("div",{className:"empty"},h("div",{className:"ei"},"✅"),h("p",null,"No alerts! All good."))):
+    h("div",null,
+      cr.length>0&&h("div",null,h("div",{style:{fontWeight:600,fontSize:13,color:"var(--er)",marginBottom:8}},"🚨 Critical ("+cr.length+")"),cr.map((a,i)=>h("div",{key:i,className:"ac cr"},h("div",{className:"ac-ic"},a.type==="stock"?"📦":"🧵"),h("div",null,h("div",{className:"ac-t"},a.title),h("div",{className:"ac-s"},a.sub))))),
+      wn.length>0&&h("div",{style:{marginTop:12}},h("div",{style:{fontWeight:600,fontSize:13,color:"var(--wn)",marginBottom:8}},"⚠️ Warnings ("+wn.length+")"),wn.map((a,i)=>h("div",{key:i,className:"ac wn"},h("div",{className:"ac-ic"},a.type==="stock"?"📦":"🧵"),h("div",null,h("div",{className:"ac-t"},a.title),h("div",{className:"ac-s"},a.sub)))))
+    )
+  );
+}
+
+// ── YARN INWARD ──
+function PInw({firm,M,inw,toast2,fname}){
+  const ini={date:today(),yarnType:"",godown:"",lotNo:"",bags:"",kgPerBag:100,totalKg:"",remarks:""};
+  const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
+  const[srch,setSrch]=useState(""),[fg,setFg]=useState("");
+  const calc=(b,k)=>{const t=+b*(+k);if(t)s("totalKg",t)};
+  async function sub(){if(!f.yarnType||!f.godown||!f.totalKg){toast2("Fill required fields","err");return}await dbs(firm,"inward",uid(),{...f,bags:+f.bags,kgPerBag:+f.kgPerBag,totalKg:+f.totalKg});sf(ini);toast2("Saved!")}
+  async function del(id){if(!confirm("Delete?"))return;await dbd(firm,"inward",id)}
+  const total=inw.reduce((a,r)=>a+(+r.totalKg||0),0);
+  const filt=[...inw].reverse().filter(r=>{const q=srch.toLowerCase();return(!fg||r.godown===fg)&&(!q||[r.yarnType,r.lotNo,r.godown].some(x=>x&&x.toLowerCase().includes(q)))});
+  return h("div",null,
+    h("div",{className:"card"},
+      h("div",{className:"chd"},h("div",{className:"ct"},"Add yarn inward"),h("span",{className:"bdg ba"},fmt(total)+" Kg total")),
+      h("div",{className:"fr c2"},FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),FL("Yarn type *",FS(f.yarnType,v=>s("yarnType",v),M.yarnTypes))),
+      h("div",{className:"fr c2"},FL("Godown / Mill *",FS(f.godown,v=>s("godown",v),M.godowns)),FL("Lot / Challan No",h("input",{value:f.lotNo,onChange:e=>s("lotNo",e.target.value)}))),
+      h("div",{className:"fr c3"},
+        FL("Bags",h("input",{type:"number",value:f.bags,onChange:e=>{s("bags",e.target.value);calc(e.target.value,f.kgPerBag)}})),
+        FL("Kg per bag",h("input",{type:"number",value:f.kgPerBag,onChange:e=>{s("kgPerBag",e.target.value);calc(f.bags,e.target.value)}})),
+        FL("Total Kg *",h("input",{type:"number",value:f.totalKg,onChange:e=>s("totalKg",e.target.value)}))
+      ),
+      FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value),style:{marginBottom:8}})),
+      h("button",{className:"btn btn-p btn-full",onClick:sub},"Save Entry")
+    ),
+    h("div",{className:"card"},
+      h("div",{className:"chd"},h("div",{className:"ct"},"Register ("+inw.length+")"),h("div",{className:"bgrp"},h("button",{className:"btn btn-sm btn-pr no-print",onClick:()=>prnt(fname,"Yarn Inward",["Date","Yarn","Godown","Lot","Bags","Kg/Bag","Total Kg","Remarks"],filt.map(r=>[fmtD(r.date),r.yarnType,r.godown,r.lotNo,r.bags,r.kgPerBag,fmt(r.totalKg),r.remarks]))},"🖨 Print"),h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("inward",["Date","Yarn","Godown","Lot","Bags","Kg/Bag","Total Kg","Remarks"],filt.map(r=>[fmtD(r.date),r.yarnType,r.godown,r.lotNo,r.bags,r.kgPerBag,r.totalKg,r.remarks]))},"⬇ Excel"))),
+      h("div",{className:"sbr"},h("input",{placeholder:"Search yarn, lot, godown...",value:srch,onChange:e=>setSrch(e.target.value)}),h("select",{value:fg,onChange:e=>setFg(e.target.value),style:{height:34}},h("option",{value:""},"All godowns"),M.godowns.map(g=>h("option",{key:g,value:g},g)))),
+      filt.length===0?Em("No entries"):
+      h("div",{className:"tw"},h("table",null,
+        h("thead",null,h("tr",null,TH(["Date","Yarn","Godown","Lot","Total Kg",""]))),
+        h("tbody",null,filt.map((r,i)=>h("tr",{key:i},
+          Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(r.date))),
+          Td(h("span",{className:"bdg bi"},r.yarnType)),Td(r.godown),Td(r.lotNo||"—"),
+          Td(h("span",{className:"mn fw5"},fmt(r.totalKg)+" Kg")),
+          Td(h("button",{className:"btn btn-sm btn-del no-print",onClick:()=>del(r._id)},"Del"))
+        )))
+      ))
+    )
+  );
+}
+
+// ── ISSUE YARN ──
+function PIss({firm,M,parties,iss,toast2,fname}){
+  const ini={date:today(),yarnType:"",godown:"",issuedTo:"",issueType:"",qty:"",beamNo:"",designNo:"",remarks:""};
+  const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
+  const[srch,setSrch]=useState("");
+  const pickP=(name)=>{const p=parties.find(x=>x.name===name);sf(prev=>({...prev,issuedTo:name,issueType:p?p.type:""}))};
+  async function sub(){if(!f.yarnType||!f.godown||!f.issuedTo||!f.qty){toast2("Fill required fields","err");return}await dbs(firm,"issues",uid(),{...f,qty:+f.qty});sf(ini);toast2("Saved!")}
+  async function del(id){if(!confirm("Delete?"))return;await dbd(firm,"issues",id)}
+  const filt=[...iss].reverse().filter(r=>{const q=srch.toLowerCase();return!q||[r.yarnType,r.issuedTo,r.beamNo,r.designNo].some(x=>x&&x.toLowerCase().includes(q))});
+  return h("div",null,
+    h("div",{className:"card"},
+      h("div",{className:"ct",style:{marginBottom:10}},"Issue yarn to weaver / sizer"),
+      h("div",{className:"fr c2"},FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),FL("Yarn type *",FS(f.yarnType,v=>s("yarnType",v),M.yarnTypes))),
+      h("div",{className:"fr c2"},FL("From Godown *",FS(f.godown,v=>s("godown",v),M.godowns)),FL("Issued to *",h("select",{value:f.issuedTo,onChange:e=>pickP(e.target.value)},h("option",{value:""},"Select..."),h("optgroup",{label:"Weavers"},parties.filter(p=>p.type==="weaver").map(p=>h("option",{key:p.name,value:p.name},p.name))),h("optgroup",{label:"Sizers"},parties.filter(p=>p.type==="sizer").map(p=>h("option",{key:p.name,value:p.name},p.name)))))),
+      h("div",{className:"fr c3"},FL("Qty (Kg) *",h("input",{type:"number",value:f.qty,onChange:e=>s("qty",e.target.value)})),FL("Beam No",h("input",{value:f.beamNo,onChange:e=>s("beamNo",e.target.value)})),FL("Design No",h("input",{value:f.designNo,onChange:e=>s("designNo",e.target.value)}))),
+      FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value),style:{marginBottom:8}})),
+      h("button",{className:"btn btn-p btn-full",onClick:sub},"Save Issue")
+    ),
+    h("div",{className:"card"},
+      h("div",{className:"chd"},h("div",{className:"ct"},"Register ("+iss.length+")"),h("div",{className:"bgrp"},h("button",{className:"btn btn-sm btn-pr no-print",onClick:()=>prnt(fname,"Issue Register",["Date","Yarn","Godown","Issued To","Type","Qty Kg","Beam","Design","Remarks"],filt.map(r=>[fmtD(r.date),r.yarnType,r.godown,r.issuedTo,r.issueType,fmt(r.qty),r.beamNo,r.designNo,r.remarks]))},"🖨 Print"),h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("issues",["Date","Yarn","Godown","Issued To","Type","Qty Kg","Beam","Design"],filt.map(r=>[fmtD(r.date),r.yarnType,r.godown,r.issuedTo,r.issueType,r.qty,r.beamNo,r.designNo]))},"⬇ Excel"))),
+      h("div",{className:"sbr"},h("input",{placeholder:"Search yarn, weaver, beam, design...",value:srch,onChange:e=>setSrch(e.target.value)})),
+      filt.length===0?Em("No entries"):
+      h("div",{className:"tw"},h("table",null,
+        h("thead",null,h("tr",null,TH(["Date","Yarn","Issued To","Qty Kg","Beam","Design",""]))),
+        h("tbody",null,filt.map((r,i)=>h("tr",{key:i},
+          Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(r.date))),
+          Td(h("span",{className:"bdg bi"},r.yarnType)),Td(r.issuedTo),
+          Td(h("span",{className:"mn fw5"},fmt(r.qty))),Td(r.beamNo||"—"),Td(r.designNo||"—"),
+          Td(h("button",{className:"btn btn-sm btn-del no-print",onClick:()=>del(r._id)},"Del"))
+        )))
+      ))
+    )
+  );
+}
+
+// ── BEAMS ──
+function PBms({firm,M,bms,toast2,fname}){
+  const all=[...M.weavers,...M.sizers];
+  const sts=["In sizing","Sizing done","In weaving","Weaving done","Fabric received","On hold","Closed"];
+  const ini={date:today(),beamNo:"",weaver:"",designNo:"",reedSpace:"",reed:"",pick:"",totalEnds:"",warpYarns:[],weftYarns:[],remarks:"",status:"In weaving"};
+  const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
+  const[ws,setWs]=useState(""),[wq,setWq]=useState(""),[fts,setFts]=useState(""),[fq,setFq]=useState("");
+  const[srch,setSrch]=useState(""),[fst,setFst]=useState("");
+  const addW=()=>{if(ws){s("warpYarns",[...f.warpYarns.filter(y=>y.t!==ws),{t:ws,q:+wq||0}]);setWs("");setWq("")}};
+  const addFt=()=>{if(fts){s("weftYarns",[...f.weftYarns.filter(y=>y.t!==fts),{t:fts,q:+fq||0}]);setFts("");setFq("")}};
+  async function sub(){if(!f.beamNo||!f.weaver||!f.designNo){toast2("Fill required fields","err");return}await dbs(firm,"beams",uid(),f);sf(ini);toast2("Beam saved!")}
+  async function del(id){if(!confirm("Delete?"))return;await dbd(firm,"beams",id)}
+  async function updSt(r,st){await dbs(firm,"beams",r._id,{...r,status:st})}
+  const pend=bms.filter(b=>!["Fabric received","Closed"].includes(b.status)).length;
+  const filt=[...bms].reverse().filter(r=>{const q=srch.toLowerCase();return(!fst||r.status===fst)&&(!q||[r.beamNo,r.weaver,r.designNo].some(x=>x&&x.toLowerCase().includes(q)))});
+  return h("div",null,
+    pend>0&&h("div",{className:"ac wn",style:{marginBottom:12}},h("div",{className:"ac-ic"},"⚠️"),h("div",null,h("div",{className:"ac-t"},pend+" beam"+(pend>1?"s":"")+" pending fabric"),h("div",{className:"ac-s"},"Filter by status below to follow up"))),
+    h("div",{className:"card"},
+      h("div",{className:"ct",style:{marginBottom:10}},"New beam entry"),
+      h("div",{className:"fr c2"},FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),FL("Beam No *",h("input",{value:f.beamNo,onChange:e=>s("beamNo",e.target.value),placeholder:"B-001"}))),
+      h("div",{className:"fr c2"},FL("Weaver / Sizer *",FS(f.weaver,v=>s("weaver",v),all)),FL("Design No *",h("input",{value:f.designNo,onChange:e=>s("designNo",e.target.value)}))),
+      h("div",{className:"fr c2"},FL("Status",FS(f.status,v=>s("status",v),sts)),FL("Reed space",h("input",{value:f.reedSpace,onChange:e=>s("reedSpace",e.target.value),placeholder:'44"'}))),
+      h("div",{className:"fr c3"},FL("Reed",h("input",{value:f.reed,onChange:e=>s("reed",e.target.value),placeholder:"68×2"})),FL("Pick",h("input",{type:"number",value:f.pick,onChange:e=>s("pick",e.target.value)})),FL("Total ends",h("input",{type:"number",value:f.totalEnds,onChange:e=>s("totalEnds",e.target.value)}))),
+      h("div",{className:"fr c2",style:{marginBottom:8}},
+        h("div",null,h("label",null,"Warp yarns"),h("div",{className:"tagr"},h("select",{value:ws,onChange:e=>setWs(e.target.value)},h("option",{value:""},"Type..."),M.yarnTypes.map(y=>h("option",{key:y,value:y},y))),h("input",{type:"number",value:wq,onChange:e=>setWq(e.target.value),placeholder:"Qty Kg",style:{maxWidth:80}}),h("button",{className:"btn btn-sm",onClick:addW},"+")),h("div",{className:"tags"},f.warpYarns.map(y=>h("span",{key:y.t,className:"ch"},y.t+(y.q?" ("+y.q+")":"")+" ",h("button",{className:"chx",onClick:()=>s("warpYarns",f.warpYarns.filter(x=>x.t!==y.t))},"×"))))),
+        h("div",null,h("label",null,"Weft yarns"),h("div",{className:"tagr"},h("select",{value:fts,onChange:e=>setFts(e.target.value)},h("option",{value:""},"Type..."),M.yarnTypes.map(y=>h("option",{key:y,value:y},y))),h("input",{type:"number",value:fq,onChange:e=>setFq(e.target.value),placeholder:"Qty Kg",style:{maxWidth:80}}),h("button",{className:"btn btn-sm",onClick:addFt},"+")),h("div",{className:"tags"},f.weftYarns.map(y=>h("span",{key:y.t,className:"ch"},y.t+(y.q?" ("+y.q+")":"")+" ",h("button",{className:"chx",onClick:()=>s("weftYarns",f.weftYarns.filter(x=>x.t!==y.t))},"×")))))
+      ),
+      FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value),style:{marginBottom:8}})),
+      h("button",{className:"btn btn-p btn-full",onClick:sub},"Save Beam")
+    ),
+    h("div",{className:"card"},
+      h("div",{className:"chd"},h("div",{className:"ct"},"Register ("+bms.length+")"),h("div",{className:"bgrp"},h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("beams",["Date","Beam No","Weaver","Design","Reed","Pick","Status","Days"],filt.map(r=>[fmtD(r.date),r.beamNo,r.weaver,r.designNo,r.reed,r.pick,r.status,daysAgo(r.date)]))},"⬇ Excel"))),
+      h("div",{className:"sbr"},h("input",{placeholder:"Search beam, weaver, design...",value:srch,onChange:e=>setSrch(e.target.value)}),h("select",{value:fst,onChange:e=>setFst(e.target.value),style:{height:34}},h("option",{value:""},"All statuses"),sts.map(st=>h("option",{key:st,value:st},st)))),
+      filt.length===0?Em("No beams"):
+      h("div",{className:"tw"},h("table",null,
+        h("thead",null,h("tr",null,TH(["Date","Beam","Weaver","Design","Days","Status",""]))),
+        h("tbody",null,filt.map((r,i)=>{
+          const d=daysAgo(r.date),done=["Fabric received","Closed"].includes(r.status);
+          return h("tr",{key:i},
+            Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(r.date))),
+            Td(h("span",{className:"bdg ba"},r.beamNo)),Td(r.weaver),
+            Td(h("span",{className:"bdg bi"},r.designNo)),
+            Td(h("span",{className:done?"tm":d>30?"ln":d>15?"mn fw5":"mn"},d+"d")),
+            h("td",null,h("select",{value:r.status||"",onChange:e=>updSt(r,e.target.value),style:{height:26,fontSize:11,padding:"2px 22px 2px 6px"}},sts.map(st=>h("option",{key:st,value:st},st)))),
+            Td(h("button",{className:"btn btn-sm btn-del no-print",onClick:()=>del(r._id)},"Del"))
+          );
+        }))
+      ))
+    )
+  );
+}
+
+// ── TRANSFER ──
+function PTrf({firm,M,parties,trf,toast2,fname}){
+  const pn=parties.map(p=>p.name);
+  const ini={date:today(),yarnType:"",fromParty:"",toParty:"",qty:"",remarks:""};
+  const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
+  async function sub(){if(!f.yarnType||!f.fromParty||!f.toParty||!f.qty){toast2("Fill required fields","err");return}if(f.fromParty===f.toParty){toast2("From and To cannot be same","err");return}await dbs(firm,"transfers",uid(),{...f,qty:+f.qty});sf(ini);toast2("Saved!")}
+  async function del(id){if(!confirm("Delete?"))return;await dbd(firm,"transfers",id)}
+  return h("div",null,
+    h("div",{className:"card"},
+      h("div",{className:"ct",style:{marginBottom:10}},"Yarn transfer between weavers / sizers"),
+      h("div",{className:"fr c2"},FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),FL("Yarn type *",FS(f.yarnType,v=>s("yarnType",v),M.yarnTypes))),
+      h("div",{className:"fr c2"},FL("From party *",FS(f.fromParty,v=>s("fromParty",v),pn)),FL("To party *",FS(f.toParty,v=>s("toParty",v),pn))),
+      FL("Qty (Kg) *",h("input",{type:"number",value:f.qty,onChange:e=>s("qty",e.target.value),style:{marginBottom:8}})),
+      FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value),style:{marginBottom:8}})),
+      h("button",{className:"btn btn-p btn-full",onClick:sub},"Save Transfer")
+    ),
+    h("div",{className:"card"},
+      h("div",{className:"chd"},h("div",{className:"ct"},"Register ("+trf.length+")"),h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("transfers",["Date","Yarn","From","To","Qty Kg","Remarks"],[...trf].reverse().map(r=>[fmtD(r.date),r.yarnType,r.fromParty,r.toParty,r.qty,r.remarks]))},"⬇ Excel")),
+      trf.length===0?Em("No transfers"):
+      h("div",{className:"tw"},h("table",null,
+        h("thead",null,h("tr",null,TH(["Date","Yarn","From","To","Qty Kg",""]))),
+        h("tbody",null,[...trf].reverse().map((r,i)=>h("tr",{key:i},
+          Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(r.date))),
+          Td(h("span",{className:"bdg bi"},r.yarnType)),Td(r.fromParty),Td(r.toParty),
+          Td(h("span",{className:"mn fw5"},fmt(r.qty))),
+          Td(h("button",{className:"btn btn-sm btn-del no-print",onClick:()=>del(r._id)},"Del"))
+        )))
+      ))
+    )
+  );
+}
+
+// ── FABRIC ──
+function PFab({firm,M,fab,toast2,fname}){
+  const ini={date:today(),weaver:"",designNo:"",reedSpace:"",reed:"",pick:"",warpYarns:[],weftYarns:[],meters:"",weight:"",remarks:""};
+  const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
+  const[ws,setWs]=useState(""),[fts,setFts]=useState(""),[srch,setSrch]=useState(""),[fw,setFw]=useState("");
+  const addW=()=>{if(ws&&!f.warpYarns.includes(ws)){s("warpYarns",[...f.warpYarns,ws]);setWs("")}};
+  const addFt=()=>{if(fts&&!f.weftYarns.includes(fts)){s("weftYarns",[...f.weftYarns,fts]);setFts("")}};
+  async function sub(){if(!f.weaver||!f.designNo||!f.meters){toast2("Fill required fields","err");return}await dbs(firm,"fabric",uid(),{...f,meters:+f.meters,pick:+f.pick,weight:+f.weight});sf(ini);toast2("Saved!")}
+  async function del(id){if(!confirm("Delete?"))return;await dbd(firm,"fabric",id)}
+  const total=fab.reduce((a,r)=>a+(+r.meters||0),0);
+  const filt=[...fab].reverse().filter(r=>{const q=srch.toLowerCase();return(!fw||r.weaver===fw)&&(!q||[r.designNo,r.weaver].some(x=>x&&x.toLowerCase().includes(q)))});
+  return h("div",null,
+    h("div",{className:"card"},
+      h("div",{className:"chd"},h("div",{className:"ct"},"Record fabric from weaver"),h("span",{className:"bdg bo"},fmt(total)+" m total")),
+      h("div",{className:"fr c2"},FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),FL("Weaver *",FS(f.weaver,v=>s("weaver",v),M.weavers))),
+      h("div",{className:"fr c2"},FL("Design No *",h("input",{value:f.designNo,onChange:e=>s("designNo",e.target.value)})),FL("Meters received *",h("input",{type:"number",value:f.meters,onChange:e=>s("meters",e.target.value)}))),
+      h("div",{className:"fr c3"},FL("Reed space",h("input",{value:f.reedSpace,onChange:e=>s("reedSpace",e.target.value),placeholder:'44"'})),FL("Reed",h("input",{value:f.reed,onChange:e=>s("reed",e.target.value),placeholder:"68×2"})),FL("Pick",h("input",{type:"number",value:f.pick,onChange:e=>s("pick",e.target.value)}))),
+      h("div",{className:"fr c2",style:{marginBottom:8}},
+        h("div",null,h("label",null,"Warp yarns"),h("div",{className:"tagr"},h("select",{value:ws,onChange:e=>setWs(e.target.value)},h("option",{value:""},"Select..."),M.yarnTypes.map(y=>h("option",{key:y,value:y},y))),h("button",{className:"btn btn-sm",onClick:addW},"+")),h("div",{className:"tags"},f.warpYarns.map(y=>h("span",{key:y,className:"ch"},y,h("button",{className:"chx",onClick:()=>s("warpYarns",f.warpYarns.filter(x=>x!==y))},"×"))))),
+        h("div",null,h("label",null,"Weft yarns"),h("div",{className:"tagr"},h("select",{value:fts,onChange:e=>setFts(e.target.value)},h("option",{value:""},"Select..."),M.yarnTypes.map(y=>h("option",{key:y,value:y},y))),h("button",{className:"btn btn-sm",onClick:addFt},"+")),h("div",{className:"tags"},f.weftYarns.map(y=>h("span",{key:y,className:"ch"},y,h("button",{className:"chx",onClick:()=>s("weftYarns",f.weftYarns.filter(x=>x!==y))},"×")))))
+      ),
+      h("div",{className:"fr c2"},FL("Weight (Kg)",h("input",{type:"number",value:f.weight,onChange:e=>s("weight",e.target.value)})),FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value)}))),
+      h("button",{className:"btn btn-p btn-full",style:{marginTop:8},onClick:sub},"Save Entry")
+    ),
+    h("div",{className:"card"},
+      h("div",{className:"chd"},h("div",{className:"ct"},"Register ("+fab.length+")"),h("div",{className:"bgrp"},h("button",{className:"btn btn-sm btn-pr no-print",onClick:()=>prnt(fname,"Fabric Received",["Date","Weaver","Design","Reed","Pick","Meters","Weight Kg","Remarks"],filt.map(r=>[fmtD(r.date),r.weaver,r.designNo,r.reed,r.pick,fmt(r.meters),r.weight,r.remarks]))},"🖨 Print"),h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("fabric",["Date","Weaver","Design","Reed","Pick","Meters","Weight Kg"],filt.map(r=>[fmtD(r.date),r.weaver,r.designNo,r.reed,r.pick,r.meters,r.weight]))},"⬇ Excel"))),
+      h("div",{className:"sbr"},h("input",{placeholder:"Search design, weaver...",value:srch,onChange:e=>setSrch(e.target.value)}),h("select",{value:fw,onChange:e=>setFw(e.target.value),style:{height:34}},h("option",{value:""},"All weavers"),M.weavers.map(w=>h("option",{key:w,value:w},w)))),
+      filt.length===0?Em("No entries"):
+      h("div",{className:"tw"},h("table",null,
+        h("thead",null,h("tr",null,TH(["Date","Weaver","Design","Reed","Pick","Meters","Wt Kg",""]))),
+        h("tbody",null,filt.map((r,i)=>h("tr",{key:i},
+          Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(r.date))),
+          Td(r.weaver),Td(h("span",{className:"bdg bi"},r.designNo)),
+          Td(r.reed||"—","mn"),Td(r.pick||"—","mn"),
+          Td(h("span",{className:"mn fw5"},fmt(r.meters)+" m")),Td(r.weight||"—","mn"),
+          Td(h("button",{className:"btn btn-sm btn-del no-print",onClick:()=>del(r._id)},"Del"))
+        )))
+      ))
+    )
+  );
+}
+
+// ── STOCK LEDGER ──
+function PLed({yBal,M,fname}){
+  const[fy,setFy]=useState(""),[fg,setFg]=useState("");
+  const rows=Object.entries(yBal).map(([k,v])=>{const[yt,gd]=k.split("||");return{yt,gd,q:v}}).filter(e=>(!fy||e.yt===fy)&&(!fg||e.gd===fg));
+  const total=rows.reduce((a,e)=>a+e.q,0);
+  const totVal=rows.reduce((a,e)=>a+e.q*((M.yarnRates||{})[e.yt]||0),0);
+  return h("div",{className:"card"},
+    h("div",{className:"chd"},
+      h("div",{className:"ct"},"Stock ledger"),
+      h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+        h("span",{className:"bdg ba mn"},fmt(total)+" Kg"),
+        totVal>0&&h("span",{className:"bdg bo mn"},"₹"+fmt(totVal)),
+        h("button",{className:"btn btn-sm btn-pr no-print",onClick:()=>prnt(fname,"Stock Ledger",["Yarn","Godown","Balance Kg","Rate/Kg","Value ₹","Status"],rows.map(e=>[e.yt,e.gd,fmt(e.q),(M.yarnRates||{})[e.yt]||"","₹"+fmt(e.q*((M.yarnRates||{})[e.yt]||0)),e.q>1000?"Good":e.q>0?"Low":"Overdrawn"]))},"🖨 Print"),
+        h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("stock",["Yarn","Godown","Balance Kg","Rate","Value","Status"],rows.map(e=>[e.yt,e.gd,e.q,(M.yarnRates||{})[e.yt]||0,e.q*((M.yarnRates||{})[e.yt]||0),e.q>1000?"Good":e.q>0?"Low":"Overdrawn"]))},"⬇ Excel")
+      )
+    ),
+    h("div",{className:"fr c2",style:{marginBottom:10}},
+      FL("Filter yarn",h("select",{value:fy,onChange:e=>setFy(e.target.value)},h("option",{value:""},"All yarns"),M.yarnTypes.map(y=>h("option",{key:y,value:y},y)))),
+      FL("Filter godown",h("select",{value:fg,onChange:e=>setFg(e.target.value)},h("option",{value:""},"All godowns"),M.godowns.map(g=>h("option",{key:g,value:g},g))))
+    ),
+    rows.length===0?Em("No stock data"):
+    h("div",{className:"tw"},h("table",null,
+      h("thead",null,h("tr",null,TH(["Yarn type","Godown","Balance (Kg)","Rate/Kg","Value (₹)","Status"]))),
+      h("tbody",null,
+        rows.map((e,i)=>{const rt=(M.yarnRates||{})[e.yt]||0,val=e.q*rt;return h("tr",{key:i},
+          Td(h("span",{className:"bdg bi"},e.yt)),Td(e.gd),
+          Td(h("span",{className:e.q<0?"ln":e.q>0?"lp":"tm"},fmt(e.q)+" Kg")),
+          Td(rt?"₹"+fmt(rt):"—","mn"),Td(val?"₹"+fmt(val):"—","mn"),
+          Td(h("span",{className:"bdg "+(e.q>1000?"bo":e.q>0?"bw":"be")},e.q>1000?"Good":e.q>0?"Low":"Overdrawn"))
+        )}),
+        h("tr",{style:{background:"var(--bg)"}},h("td",{colSpan:2,style:{fontWeight:500,fontSize:12}},"Total ("+rows.length+" rows)"),h("td",null,h("span",{className:total<0?"ln":"lp"},fmt(total)+" Kg")),h("td",null),h("td",null,totVal>0&&h("span",{className:"lp"},"₹"+fmt(totVal))),h("td",null))
+      )
+    ))
+  );
+}
+
+// ── PARTY LEDGER ──
+function PPar({pBal,parties,iss,M,fname}){
+  const[sel,setSel]=useState("");
+  const lastD={};iss.forEach(r=>{if(!lastD[r.issuedTo]||r.date>lastD[r.issuedTo])lastD[r.issuedTo]=r.date});
+  const keys=Object.keys(pBal),shown=sel?keys.filter(k=>k===sel):keys;
+  return h("div",null,
+    h("div",{className:"card"},
+      h("div",{className:"chd"},h("div",{className:"ct"},"Yarn held by each party"),
+        h("div",{style:{display:"flex",gap:8}},
+          h("select",{value:sel,onChange:e=>setSel(e.target.value),style:{height:30,fontSize:12}},h("option",{value:""},"All parties"),parties.map(p=>h("option",{key:p.name,value:p.name},p.name))),
+          h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("party-ledger",["Party","Type","Yarn","Qty Kg","Value ₹","Days"],keys.flatMap(pt=>Object.entries(pBal[pt]).map(([yt,qty])=>[pt,parties.find(p=>p.name===pt)?.type||"",yt,qty,qty*((M.yarnRates||{})[yt]||0),daysAgo(lastD[pt])])))},"⬇ Excel")
+        )
+      ),
+      shown.length===0?Em("No data. Issue yarn to see balances."):
+      shown.map(party=>{
+        const yarns=pBal[party],totalKg=Object.values(yarns).reduce((a,v)=>a+v,0);
+        const totalVal=Object.entries(yarns).reduce((a,[yt,qty])=>a+qty*((M.yarnRates||{})[yt]||0),0);
+        const days=daysAgo(lastD[party]);
+        const pt=parties.find(p=>p.name===party);
+        return h("div",{key:party,className:"pbcard"},
+          h("div",{className:"pbname"},
+            h("span",{className:"bdg "+(pt?.type==="weaver"?"bo":"bw")},pt?.type||"party"),
+            party,
+            h("span",{style:{marginLeft:"auto",fontSize:11,color:days>30?"var(--er)":days>15?"var(--wn)":"var(--mu)"}},days+"d ago")
+          ),
+          Object.entries(yarns).filter(([,qty])=>qty!==0).map(([yt,qty])=>{
+            const rt=(M.yarnRates||{})[yt]||0;
+            return h("div",{key:yt,className:"pbrow"},
+              h("span",null,h("span",{className:"bdg bi",style:{marginRight:5}},yt)),
+              h("div",{style:{display:"flex",gap:10}},h("span",{className:qty<0?"ln":qty>0?"lp":"tm"},fmt(qty)+" Kg"),rt>0&&h("span",{className:"tm",style:{fontSize:11}},"₹"+fmt(qty*rt)))
+            );
+          }),
+          h("div",{style:{display:"flex",justifyContent:"space-between",paddingTop:6,borderTop:"1px solid var(--bdl)",marginTop:4,fontSize:12,fontWeight:500}},
+            h("span",null,"Total: "+fmt(totalKg)+" Kg"),
+            totalVal>0&&h("span",{style:{color:"var(--ok)"}},"₹"+fmt(totalVal))
+          )
+        );
+      })
+    )
+  );
+}
+
+// ── PERFORMANCE ──
+function PRep({M,iss,fab,pBal,fname}){
+  const[per,setPer]=useState("all");
+  const now=new Date();
+  const inP=(d)=>{if(per==="all")return true;const dt=new Date(d);if(per==="mo")return dt.getMonth()===now.getMonth()&&dt.getFullYear()===now.getFullYear();return(now-dt)<90*864e5};
+  const stats=M.weavers.map(w=>{
+    const iKg=iss.filter(r=>r.issuedTo===w&&inP(r.date)).reduce((a,r)=>a+(+r.qty||0),0);
+    const fM=fab.filter(r=>r.weaver===w&&inP(r.date)).reduce((a,r)=>a+(+r.meters||0),0);
+    const fKg=fab.filter(r=>r.weaver===w&&inP(r.date)).reduce((a,r)=>a+(+r.weight||0),0);
+    const hKg=Object.values(pBal[w]||{}).reduce((a,v)=>a+v,0);
+    const wKg=iKg>0?Math.max(0,iKg-fKg-hKg):0;
+    const wPct=iKg>0?((wKg/iKg)*100).toFixed(1):"0";
+    const mPk=iKg>0?(fM/iKg).toFixed(2):"0";
+    return{w,iKg,fM,fKg,hKg,wKg,wPct,mPk};
+  }).filter(s=>s.iKg>0||s.fM>0);
+  return h("div",{className:"card"},
+    h("div",{className:"chd"},h("div",{className:"ct"},"Weaver performance report"),
+      h("div",{style:{display:"flex",gap:8}},
+        h("select",{value:per,onChange:e=>setPer(e.target.value),style:{height:30,fontSize:12}},h("option",{value:"all"},"All time"),h("option",{value:"mo"},"This month"),h("option",{value:"3m"},"Last 3 months")),
+        h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("performance",["Weaver","Issued Kg","Fabric m","Fabric Kg","Held Kg","Wastage Kg","Waste %","m/Kg"],stats.map(s=>[s.w,s.iKg,s.fM,s.fKg,s.hKg,s.wKg,s.wPct,s.mPk]))},"⬇ Excel")
+      )
+    ),
+    stats.length===0?Em("No data yet. Issue yarn and record fabric to see performance."):
+    stats.map(s=>h("div",{key:s.w,className:"rc"},
+      h("div",{className:"rc-n"},h("span",null,s.w),h("span",{className:"bdg "+(+s.wPct<5?"bo":+s.wPct<10?"bw":"be")},s.wPct+"% waste")),
+      h("div",{className:"g2"},
+        h("div",null,
+          h("div",{className:"rc-r"},h("span",{className:"rc-l"},"Yarn issued"),h("span",{className:"mn fw5"},fmt(s.iKg)+" Kg")),
+          h("div",{className:"rc-r"},h("span",{className:"rc-l"},"Fabric received"),h("span",{className:"mn fw5"},fmt(s.fM)+" m")),
+          h("div",{className:"rc-r"},h("span",{className:"rc-l"},"Fabric weight"),h("span",{className:"mn"},fmt(s.fKg)+" Kg"))
+        ),
+        h("div",null,
+          h("div",{className:"rc-r"},h("span",{className:"rc-l"},"Still held"),h("span",{className:"mn"},fmt(s.hKg)+" Kg")),
+          h("div",{className:"rc-r"},h("span",{className:"rc-l"},"Wastage"),h("span",{className:+s.wPct>10?"ln":"mn"},fmt(s.wKg)+" Kg")),
+          h("div",{className:"rc-r"},h("span",{className:"rc-l"},"Efficiency"),h("span",{className:"mn fw5"},s.mPk+" m/Kg"))
+        )
+      )
+    ))
+  );
+}
+
+// ── MASTERS ──
+function PMas({M,updM,toast2}){
+  const[tab,setTab]=useState("yarn");
+  function ML({title,mk,ic}){
+    const items=M[mk]||[];const[v,setV]=useState("");
+    const add=async()=>{if(!v.trim()||items.includes(v.trim()))return;await updM(mk,[...items,v.trim()]);setV("");toast2(v.trim()+" added")};
+    const rm=async(item)=>{await updM(mk,items.filter(x=>x!==item));toast2(item+" removed")};
+    return h("div",{className:"card"},h("div",{className:"ct",style:{marginBottom:10}},title),h("div",{className:"addr"},h("input",{value:v,onChange:e=>setV(e.target.value),onKeyDown:e=>e.key==="Enter"&&add(),placeholder:"Add..."}),h("button",{className:"btn btn-p btn-sm",onClick:add},"+ Add")),items.length===0?h("p",{className:"tm",style:{fontSize:12}},"No items."):items.map(item=>h("div",{key:item,className:"ml-i"},h("span",{style:{fontSize:13}},h("span",{style:{marginRight:7,opacity:.4}},ic),item),h("button",{className:"btn btn-sm btn-del",onClick:()=>rm(item)},"Remove"))));
+  }
+  function YarnM(){
+    const items=M.yarnTypes||[];const[v,setV]=useState("");
+    const add=async()=>{if(!v.trim()||items.includes(v.trim()))return;await updM("yarnTypes",[...items,v.trim()]);setV("")};
+    const rm=async(yt)=>updM("yarnTypes",items.filter(x=>x!==yt));
+    const setR=async(yt,val)=>updM("yarnRates",{...(M.yarnRates||{}),[yt]:+val||0});
+    const setMin=async(yt,val)=>updM("yarnMinStock",{...(M.yarnMinStock||{}),[yt]:+val||0});
+    return h("div",{className:"card"},
+      h("div",{className:"ct",style:{marginBottom:10}},"Yarn types · Rate per Kg · Min stock alert"),
+      h("div",{className:"addr"},h("input",{value:v,onChange:e=>setV(e.target.value),onKeyDown:e=>e.key==="Enter"&&add(),placeholder:"Add yarn type..."}),h("button",{className:"btn btn-p btn-sm",onClick:add},"+ Add")),
+      h("div",{className:"tw"},h("table",null,
+        h("thead",null,h("tr",null,TH(["Yarn type","Rate/Kg (₹)","Min stock (Kg)",""]))),
+        h("tbody",null,items.map(yt=>h("tr",{key:yt},
+          h("td",null,h("span",{style:{fontSize:13}},yt)),
+          h("td",null,h("input",{type:"number",value:(M.yarnRates||{})[yt]||"",onChange:e=>setR(yt,e.target.value),placeholder:"0",style:{height:28,fontSize:12,width:90}})),
+          h("td",null,h("input",{type:"number",value:(M.yarnMinStock||{})[yt]||"",onChange:e=>setMin(yt,e.target.value),placeholder:"0 = off",style:{height:28,fontSize:12,width:120}})),
+          h("td",null,h("button",{className:"btn btn-sm btn-del",onClick:()=>rm(yt)},"Del"))
+        )))
+      ))
+    );
+  }
+  const tabs=[{id:"yarn",l:"Yarn types"},{id:"godowns",l:"Godowns"},{id:"weavers",l:"Weavers"},{id:"sizers",l:"Sizers"}];
+  return h("div",null,
+    h("div",{style:{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}},tabs.map(t=>h("button",{key:t.id,className:"btn"+(tab===t.id?" btn-p":""),style:{height:32,fontSize:12},onClick:()=>setTab(t.id)},t.l))),
+    tab==="yarn"&&h(YarnM,null),
+    tab==="godowns"&&h(ML,{title:"Godowns / Mills",mk:"godowns",ic:"🏭"}),
+    tab==="weavers"&&h(ML,{title:"Weavers",mk:"weavers",ic:"👤"}),
+    tab==="sizers"&&h(ML,{title:"Sizers / Doublers",mk:"sizers",ic:"⚙"}),
+    h("div",{className:"card",style:{background:"var(--inb)",border:"1px solid #BDD8ED",marginTop:8}},h("p",{style:{fontSize:13,color:"var(--in)",lineHeight:1.6}},"💡 Masters are saved separately per firm. Set yarn rates to see stock value. Set minimum stock to get low stock alerts."))
+  );
+}
+
+// ── Helpers ──
+function FL(label,child){return h("div",{className:"fld"},h("label",null,label),child)}
+function FS(val,onChange,opts){return h("select",{value:val,onChange:e=>onChange(e.target.value)},h("option",{value:""},"Select..."),opts.map(o=>h("option",{key:o,value:o},o)))}
+function TH(cols){return cols.map(c=>h("th",{key:c},c))}
+function Td(child,cls=""){return h("td",{className:cls},child)}
+function Em(msg){return h("div",{className:"empty"},h("div",{className:"ei"},"📋"),h("p",null,msg))}
+
+if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
+try{ReactDOM.render(h(Root),document.getElementById("r"));}catch(e){document.getElementById("r").innerHTML="<div style='padding:20px;color:red'>Error: "+e.message+"</div>";}
+</script>
+</body>
+</html>
