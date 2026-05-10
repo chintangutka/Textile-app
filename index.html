@@ -544,17 +544,16 @@ function extractCount(yarnName){
   const m=yarnName.match(/(?:\d+\/)?(\d+)/);
   return m?+m[1]:0;
 }
+// Standard Indian textile mill formulas (both use Count × 1693.6):
 // Warp Kg = (Total Ends × Meters) / (Count × 1693.6)
-// Weft Kg = (Reed Space inches × Pick/cm × Meters) / (Count × 1693.6) — pick is per inch here
-// Standard: Warp=(Ends×Meters)/(Count×1693.6), Weft=(ReedSpaceIn×Pick×Meters)/(Count×1693.6×0.9144×39.37)
-// Simplified: Weft=(ReedSpaceIn×Pick×Meters)/(Count×66667)
+// Weft Kg = (Reed Space inches × Pick per inch × Meters) / (Count × 1693.6)
 function calcWarpKg(count,ends,meters){
   if(!count||!ends||!meters)return 0;
   return(+ends*+meters)/(count*1693.6);
 }
 function calcWeftKg(count,reedSpaceIn,pick,meters){
   if(!count||!reedSpaceIn||!pick||!meters)return 0;
-  return(+reedSpaceIn*+pick*+meters)/(count*66667);
+  return(+reedSpaceIn*+pick*+meters)/(count*1693.6);
 }
 // Parse reed space: "44" or '44"' → 44
 function parseRS(v){return+String(v).replace(/[^0-9.]/g,"")||0}
@@ -680,7 +679,7 @@ function PBms({firm,M,bms,toast2,fname}){
           h("span",null,"Total yarn required"),
           h("span",{className:"mn",style:{color:"var(--in)"}},totalYarnKg.toFixed(2)+" Kg")
         ),
-        h("div",{style:{fontSize:10,color:"var(--mu)",marginTop:4}},"Formula: Warp = (Ends × Meters) / (Count × 1693.6) · Weft = (Reed Space × Pick × Meters) / (Count × 66667)")
+        h("div",{style:{fontSize:10,color:"var(--mu)",marginTop:4}},"Formula: Warp = (Ends × Meters) / (Count × 1693.6)  ·  Weft = (Reed Space\" × Pick/inch × Meters) / (Count × 1693.6)")
       ),
       !hasCalc&&(f.warpYarns.length>0||f.weftYarns.length>0)&&h("div",{style:{fontSize:12,color:"var(--mu)",background:"var(--wnb)",border:"1px solid #F0C98A",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:8}},"⚠ Enter Reed Space, Pick, Total Ends and Total Meters to see yarn consumption estimate."),
       FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value),style:{marginBottom:8}})),
