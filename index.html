@@ -209,7 +209,7 @@ const mSave=async(fid,data)=>db.collection("firms").doc(fid).collection("masters
 const mListen=(fid,cb)=>db.collection("firms").doc(fid).collection("masters").doc("config").onSnapshot(s=>{if(s.exists)cb(s.data());});
 
 const DEF={
-  yarnTypes:["40s Cotton","60s Cotton","50s Cotton","40 PV","2/40s Cotton TFO","2/60s Cotton TFO","50/50 PC","2/30s Cotton","80s Cotton","30s Cotton"],
+  yarnTypes:["40s Cotton","60s Cotton","2/40s Cotton","2/60s Cotton","2/80s Cotton","2/100s Cotton","80s Cotton","100s Cotton","150d Polyester Roto","80d Polyester","150d FDY","75d Polyester","50/50 PC","40 PV"],
   godowns:["Mill A","Mill B","Own Godown","Supplier X","Supplier Y"],
   weavers:["Ramesh Weaver","Suresh Loom","Karim Handloom","Ganesh Fabrics"],
   sizers:["Patel Sizing","Kumar Doubler","Singh Warp Prep"],
@@ -538,15 +538,107 @@ function PIss({firm,M,parties,iss,inw,toast2,fname,yBal}){
 }
 
 // ── BEAMS ──
-// Yarn count extractor: "40s Cotton" → 40, "2/40s Cotton TFO" → 40, "50/50 PC" → 50
-function extractCount(yarnName){
-  if(!yarnName)return 0;
-  const m=yarnName.match(/(?:\d+\/)?(\d+)/);
-  return m?+m[1]:0;
+
+// ── YARN TYPE DETECTION ──
+// Returns {type:"count"|"denier", value:number, ply:number, denier:number}
+// Cotton count yarns: "40s", "2/40s", "2/40s Cotton TFO" → type:"count"
+// Polyester/denier yarns: "150d", "150D", "80d single", "150d roto" → type:"denier"
+function parseYarnSpec(yarnName){
+  if(!yarnName)return{type:"count",value:0,ply:1,denier:0,label:""};
+  const n=yarnName.trim();
+
+  // Denier detection: number followed by 'd' or 'D' (optionally with descriptor like "roto","single","dty","fdy","poy")
+  const denierM=n.match(/^(\d+(?:\.\d+)?)\s*[dD]\b/);
+  if(denierM){
+    const d=+denierM[1];
+    return{type:"denier",value:d,ply:1,denier:d,label:d+"D"};
+  }
+
+  // Doubled cotton count: "2/40s", "2/60s", "3/40s" etc.
+  const doubledM=n.match(/^(\d+)\/(\d+)\s*[sS]?\b/);
+  if(doubledM){
+    const ply=+doubledM[1],cnt=+doubledM[2];
+    // Effective count for doubled yarn = single count / ply
+    // But for consumption formula, warp/weft uses actual count (each strand)
+    // Denier equivalent = 5905 / count  (Ne to denier)
+    // For ply yarn: effective denier = ply × (5905/count)
+    const effDenier=ply*(5905/cnt);
+    return{type:"count",value:cnt,ply,denier:effDenier,label:ply+"/"+cnt+"s ("+ply+"ply, "+cnt+"s each)"};
+  }
+
+  // Single cotton count: "40s", "40s Cotton", "80s", "30s Cotton TFO"
+  const singleM=n.match(/^(\d+(?:\.\d+)?)\s*[sS]?\b/);
+  if(singleM){
+    const cnt=+singleM[1];
+    const effDenier=5905/cnt;
+    return{type:"count",value:cnt,ply:1,denier:effDenier,label:cnt+"s"};
+  }
+
+  return{type:"count",value:0,ply:1,denier:0,label:""};
 }
-// Standard Indian textile mill formulas (both use Count × 1693.6):
-// Warp Kg = (Total Ends × Meters) / (Count × 1693.6)
-// Weft Kg = (Reed Space inches × Pick per inch × Meters) / (Count × 1693.6)
+
+// Backward-compatible count extractor (used in older calc paths)
+function extractCount(yarnName){
+  const spec=parseYarnSpec(yarnName);
+  if(spec.type==="count")return spec.value;
+  return 0; // denier yarns handled separately
+}
+
+// ── CONSUMPTION FORMULAS ──
+// Cotton count yarn (Ne system):
+//   Warp Kg = (Ends × Meters) / (Count × 1693.6)
+//   For doubled yarn (2/40s): use single count (40) — formula stays same per strand,
+//   but ply is accounted for by denier-based path below for accuracy.
+//
+// Denier yarn (polyester / filament):
+//   Warp Kg = (Denier × Ends × Meters) / (9000 × 1000)
+//   Weft Kg = (Denier × ReedSpace" × Pick × Meters) / (9000 × 1000)
+//
+// For doubled cotton we convert to denier for uniform calculation:
+//   effDenier = ply × (5905 / count)
+//   then use denier formula
+
+function calcWarpKgByDenier(denier,ends,meters){
+  if(!denier||!ends||!meters)return 0;
+  return(denier*+ends*+meters)/(9000*1000);
+}
+function calcWeftKgByDenier(denier,reedSpaceIn,pick,meters){
+  if(!denier||!reedSpaceIn||!pick||!meters)return 0;
+  return(denier*+reedSpaceIn*+pick*+meters)/(9000*1000);
+}
+
+// Unified warp/weft calc — works for both count and denier yarns
+function calcWarpKgUnified(yarnName,ends,meters){
+  const spec=parseYarnSpec(yarnName);
+  if(!ends||!meters)return 0;
+  if(spec.type==="denier"||spec.ply>1){
+    // Use denier path (covers: polyester deniers, doubled cotton like 2/40s)
+    return calcWarpKgByDenier(spec.denier,ends,meters);
+  }
+  // Single count cotton — classic formula
+  if(!spec.value)return 0;
+  return(+ends*+meters)/(spec.value*1693.6);
+}
+function calcWeftKgUnified(yarnName,reedSpaceIn,pick,meters){
+  const spec=parseYarnSpec(yarnName);
+  if(!reedSpaceIn||!pick||!meters)return 0;
+  if(spec.type==="denier"||spec.ply>1){
+    return calcWeftKgByDenier(spec.denier,reedSpaceIn,pick,meters);
+  }
+  if(!spec.value)return 0;
+  return(+reedSpaceIn*+pick*+meters)/(spec.value*1693.6);
+}
+
+// Yarn spec label for UI display
+function yarnSpecBadge(yarnName){
+  const spec=parseYarnSpec(yarnName);
+  if(!spec.value&&!spec.denier)return null;
+  if(spec.type==="denier")return spec.denier+"D polyester";
+  if(spec.ply>1)return spec.ply+"/"+spec.value+"s · "+Math.round(spec.denier)+"D equiv";
+  return spec.value+"s count · "+Math.round(spec.denier)+"D equiv";
+}
+
+// Legacy wrappers (kept for any existing calls)
 function calcWarpKg(count,ends,meters){
   if(!count||!ends||!meters)return 0;
   return(+ends*+meters)/(count*1693.6);
@@ -580,14 +672,14 @@ function PBms({firm,M,bms,toast2,fname}){
   // Total warp Kg split by yarn %
   const totalWarpPct=f.warpYarns.reduce((a,y)=>a+(+y.pct||0),0)||1;
   const warpCalc=f.warpYarns.map(y=>{
-    const cnt=extractCount(y.t),totalWarp=calcWarpKg(cnt,ends,meters);
-    return{t:y.t,kg:totalWarp*(+y.pct||100)/totalWarpPct};
+    const totalWarp=calcWarpKgUnified(y.t,ends,meters);
+    return{t:y.t,kg:totalWarp*(+y.pct||100)/totalWarpPct,spec:parseYarnSpec(y.t)};
   });
   // Total weft Kg split by yarn %
   const totalWeftPct=f.weftYarns.reduce((a,y)=>a+(+y.pct||0),0)||1;
   const weftCalc=f.weftYarns.map(y=>{
-    const cnt=extractCount(y.t),totalWeft=calcWeftKg(cnt,rs,pick,meters);
-    return{t:y.t,kg:totalWeft*(+y.pct||100)/totalWeftPct};
+    const totalWeft=calcWeftKgUnified(y.t,rs,pick,meters);
+    return{t:y.t,kg:totalWeft*(+y.pct||100)/totalWeftPct,spec:parseYarnSpec(y.t)};
   });
   const totalYarnKg=[...warpCalc,...weftCalc].reduce((a,x)=>a+x.kg,0);
 
@@ -599,8 +691,8 @@ function PBms({firm,M,bms,toast2,fname}){
     const twp=wy.reduce((a,y)=>a+(+y.pct||0),0)||1;
     const tfp=fy.reduce((a,y)=>a+(+y.pct||0),0)||1;
     const items=[
-      ...wy.map(y=>({t:y.t,role:"warp",kg:calcWarpKg(extractCount(y.t),e,m)*(+y.pct||100)/twp})),
-      ...fy.map(y=>({t:y.t,role:"weft",kg:calcWeftKg(extractCount(y.t),rs2,p,m)*(+y.pct||100)/tfp}))
+      ...wy.map(y=>({t:y.t,role:"warp",kg:calcWarpKgUnified(y.t,e,m)*(+y.pct||100)/twp})),
+      ...fy.map(y=>({t:y.t,role:"weft",kg:calcWeftKgUnified(y.t,rs2,p,m)*(+y.pct||100)/tfp}))
     ];
     return{items,total:items.reduce((a,x)=>a+x.kg,0)};
   }
@@ -664,14 +756,18 @@ function PBms({firm,M,bms,toast2,fname}){
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}},
           warpCalc.length>0&&h("div",null,
             h("div",{style:{fontSize:10,color:"var(--mu)",marginBottom:4,fontWeight:600}},"WARP"),
-            warpCalc.map(y=>h("div",{key:y.t,style:{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0",borderBottom:"1px solid var(--bdl)"}},
-              h("span",null,y.t),h("span",{className:"mn fw5"},y.kg.toFixed(2)+" Kg")
+            warpCalc.map(y=>h("div",{key:y.t,style:{padding:"4px 0",borderBottom:"1px solid var(--bdl)"}},
+              h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12}},
+                h("span",null,y.t),h("span",{className:"mn fw5"},y.kg.toFixed(2)+" Kg")),
+              y.spec&&h("div",{style:{fontSize:10,color:"var(--mu)",marginTop:1}},yarnSpecBadge(y.t))
             ))
           ),
           weftCalc.length>0&&h("div",null,
             h("div",{style:{fontSize:10,color:"var(--mu)",marginBottom:4,fontWeight:600}},"WEFT"),
-            weftCalc.map(y=>h("div",{key:y.t,style:{display:"flex",justifyContent:"space-between",fontSize:12,padding:"3px 0",borderBottom:"1px solid var(--bdl)"}},
-              h("span",null,y.t),h("span",{className:"mn fw5"},y.kg.toFixed(2)+" Kg")
+            weftCalc.map(y=>h("div",{key:y.t,style:{padding:"4px 0",borderBottom:"1px solid var(--bdl)"}},
+              h("div",{style:{display:"flex",justifyContent:"space-between",fontSize:12}},
+                h("span",null,y.t),h("span",{className:"mn fw5"},y.kg.toFixed(2)+" Kg")),
+              y.spec&&h("div",{style:{fontSize:10,color:"var(--mu)",marginTop:1}},yarnSpecBadge(y.t))
             ))
           )
         ),
@@ -679,7 +775,11 @@ function PBms({firm,M,bms,toast2,fname}){
           h("span",null,"Total yarn required"),
           h("span",{className:"mn",style:{color:"var(--in)"}},totalYarnKg.toFixed(2)+" Kg")
         ),
-        h("div",{style:{fontSize:10,color:"var(--mu)",marginTop:4}},"Formula: Warp = (Ends × Meters) / (Count × 1693.6)  ·  Weft = (Reed Space\" × Pick/inch × Meters) / (Count × 1693.6)")
+        h("div",{style:{fontSize:10,color:"var(--mu)",marginTop:4,lineHeight:1.6}},
+          "Cotton count: Warp = (Ends × m) / (Count × 1693.6)  ·  Weft = (RS\" × PPI × m) / (Count × 1693.6)",h("br",null),
+          "Doubled cotton (2/40s etc): converted via denier = ply × (5905/count)",h("br",null),
+          "Polyester/denier: Warp = (D × Ends × m) / 9,000,000  ·  Weft = (D × RS\" × PPI × m) / 9,000,000"
+        )
       ),
       !hasCalc&&(f.warpYarns.length>0||f.weftYarns.length>0)&&h("div",{style:{fontSize:12,color:"var(--mu)",background:"var(--wnb)",border:"1px solid #F0C98A",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:8}},"⚠ Enter Reed Space, Pick, Total Ends and Total Meters to see yarn consumption estimate."),
       FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value),style:{marginBottom:8}})),
@@ -939,15 +1039,19 @@ function PMas({M,updM,toast2}){
     const setMin=async(yt,val)=>updM("yarnMinStock",{...(M.yarnMinStock||{}),[yt]:+val||0});
     return h("div",{className:"card"},
       h("div",{className:"ct",style:{marginBottom:10}},"Yarn types · Rate per Kg · Min stock alert"),
-      h("div",{className:"addr"},h("input",{value:v,onChange:e=>setV(e.target.value),onKeyDown:e=>e.key==="Enter"&&add(),placeholder:"Add yarn type..."}),h("button",{className:"btn btn-p btn-sm",onClick:add},"+ Add")),
+      h("div",{className:"addr"},h("input",{value:v,onChange:e=>setV(e.target.value),onKeyDown:e=>e.key==="Enter"&&add(),placeholder:"Add yarn type... e.g. 2/40s Cotton, 150d Roto"}),h("button",{className:"btn btn-p btn-sm",onClick:add},"+ Add")),
+      h("div",{style:{fontSize:11,color:"var(--mu)",background:"var(--wnb)",border:"1px solid #F0C98A",borderRadius:"var(--r)",padding:"7px 10px",marginBottom:9,lineHeight:1.6}},
+        "💡 Naming guide: Cotton counts → \"40s Cotton\", \"2/40s Cotton\" (doubled), \"2/60s Cotton TFO\". Polyester deniers → \"150d Roto\", \"80d Single\", \"75d FDY\". The system auto-detects yarn type and applies the correct consumption formula."
+      ),
       h("div",{className:"tw"},h("table",null,
-        h("thead",null,h("tr",null,TH(["Yarn type","Rate/Kg (₹)","Min stock (Kg)",""]))),
-        h("tbody",null,items.map(yt=>h("tr",{key:yt},
+        h("thead",null,h("tr",null,TH(["Yarn type","Type / Spec","Rate/Kg (₹)","Min stock (Kg)",""]))),
+        h("tbody",null,items.map(yt=>{const spec=parseYarnSpec(yt);return h("tr",{key:yt},
           h("td",null,h("span",{style:{fontSize:13}},yt)),
+          h("td",null,h("span",{className:"bdg "+(spec.type==="denier"?"bi":spec.ply>1?"ba":"bo"),style:{fontSize:10}},spec.type==="denier"?spec.denier+"D polyester":spec.ply>1?spec.ply+"/"+spec.value+"s ("+Math.round(spec.denier)+"D)":spec.value>0?spec.value+"s cotton":"—")),
           h("td",null,h("input",{type:"number",value:(M.yarnRates||{})[yt]||"",onChange:e=>setR(yt,e.target.value),placeholder:"0",style:{height:28,fontSize:12,width:90}})),
           h("td",null,h("input",{type:"number",value:(M.yarnMinStock||{})[yt]||"",onChange:e=>setMin(yt,e.target.value),placeholder:"0 = off",style:{height:28,fontSize:12,width:120}})),
           h("td",null,h("button",{className:"btn btn-sm btn-del",onClick:()=>rm(yt)},"Del"))
-        )))
+        )})))
       ))
     );
   }
