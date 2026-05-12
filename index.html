@@ -472,6 +472,13 @@ function PIss({firm,M,parties,iss,inw,toast2,fname,yBal}){
   const[srch,setSrch]=useState("");
   const pickP=(name)=>{const p=parties.find(x=>x.name===name);sf(prev=>({...prev,issuedTo:name,issueType:p?p.type:""}))};
 
+  // Compute yarns available in selected godown (with effective qty for edit mode)
+  const gdYarnMap=f.godown?{}:null;
+  if(gdYarnMap){Object.entries(yBal).forEach(([k,v])=>{if(k.endsWith("||"+f.godown)){const yt=k.split("||")[0];gdYarnMap[yt]=(v||0)+(yt===f.yarnType&&editId?origQty:0);}});}
+  const availYarns=gdYarnMap
+    ?Object.entries(gdYarnMap).filter(([yt,q])=>q>0||yt===f.yarnType).sort(([,a],[,b])=>b-a).map(([yt,q])=>({value:yt,label:yt+" ("+fmt(q)+" Kg)"}))
+    :M.yarnTypes.map(y=>({value:y,label:y}));
+
   // Available stock for selected yarn+godown
   const availKey=f.yarnType&&f.godown?f.yarnType+"||"+f.godown:null;
   const availStock=availKey?(yBal[availKey]||0):null;
@@ -508,8 +515,15 @@ function PIss({firm,M,parties,iss,inw,toast2,fname,yBal}){
     h("div",{className:"card"},
       editId&&h("div",{className:"edit-bar"},"✏️ Editing issue — ",h("button",{className:"btn btn-sm",style:{marginLeft:"auto"},onClick:cancelEdit},"Cancel")),
       h("div",{className:"ct",style:{marginBottom:10}},editId?"Update issue":"Issue yarn to weaver / sizer"),
-      h("div",{className:"fr c2"},FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),FL("Yarn type *",FS(f.yarnType,v=>s("yarnType",v),M.yarnTypes))),
-      h("div",{className:"fr c2"},FL("From Godown *",FS(f.godown,v=>s("godown",v),M.godowns)),FL("Issued to *",h("select",{value:f.issuedTo,onChange:e=>pickP(e.target.value)},h("option",{value:""},"Select..."),h("optgroup",{label:"Weavers"},parties.filter(p=>p.type==="weaver").map(p=>h("option",{key:p.name,value:p.name},p.name))),h("optgroup",{label:"Sizers"},parties.filter(p=>p.type==="sizer").map(p=>h("option",{key:p.name,value:p.name},p.name)))))),
+      h("div",{className:"fr c2"},FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),FL("From Godown *",FS(f.godown,v=>{s("godown",v);if(f.yarnType&&v){const k=f.yarnType+"||"+v;if(!yBal[k]||yBal[k]<=0)s("yarnType","");}},M.godowns))),
+      h("div",{className:"fr c2"},
+        FL("Yarn type *",h("div",null,
+          FSQ(f.yarnType,v=>s("yarnType",v),availYarns,f.godown?"— select yarn —":"Select godown first"),
+          !f.godown&&h("div",{style:{fontSize:11,color:"var(--mu)",marginTop:3}},"👆 Select a godown to see available yarns"),
+          f.godown&&availYarns.length===0&&h("div",{style:{fontSize:11,color:"var(--er)",marginTop:3}},"No yarn available in this godown")
+        )),
+        FL("Issued to *",h("select",{value:f.issuedTo,onChange:e=>pickP(e.target.value)},h("option",{value:""},"Select..."),h("optgroup",{label:"Weavers"},parties.filter(p=>p.type==="weaver").map(p=>h("option",{key:p.name,value:p.name},p.name))),h("optgroup",{label:"Sizers"},parties.filter(p=>p.type==="sizer").map(p=>h("option",{key:p.name,value:p.name},p.name)))))
+      ),
       // Stock availability panel
       availKey&&h("div",{style:{background:availForEdit<0?"var(--erb)":availForEdit<100?"var(--wnb)":"var(--okb)",border:"1px solid "+(availForEdit<0?"#F5C6C6":availForEdit<100?"#F0C98A":"#B8E5CB"),borderRadius:"var(--r)",padding:"8px 12px",marginBottom:8,display:"flex",gap:16,flexWrap:"wrap",alignItems:"center"}},
         h("div",null,h("div",{style:{fontSize:10,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".05em"}},"Available Stock"),h("div",{style:{fontFamily:"DM Mono,monospace",fontSize:15,fontWeight:500,color:availForEdit<0?"var(--er)":availForEdit<100?"var(--wn)":"var(--ok)"}},fmt(availForEdit)+" Kg")),
@@ -671,11 +685,11 @@ function parseRS(v){return+String(v).replace(/[^0-9.]/g,"")||0}
 
 function PBms({firm,M,bms,fab,toast2,fname}){
   const[editId,setEditId]=useState(null);
-  const startEdit=(r)=>{setEditId(r._id);sf({date:r.date||today(),beamNo:r.beamNo||"",weaver:r.weaver||"",designNo:r.designNo||"",reedSpace:r.reedSpace||"",reed:r.reed||"",pick:r.pick||"",totalEnds:r.totalEnds||"",totalMeters:r.totalMeters||"",warpYarns:r.warpYarns||[],weftYarns:r.weftYarns||[],crimp:r.crimp||"",actualKg:r.actualKg!=null&&r.actualKg!==""?r.actualKg:"",remarks:r.remarks||"",status:r.status||"In weaving"})};
+  const startEdit=(r)=>{setEditId(r._id);sf({date:r.date||today(),beamType:r.beamType||"weaving",beamNo:r.beamNo||"",weaver:r.weaver||"",designNo:r.designNo||"",reedSpace:r.reedSpace||"",reed:r.reed||"",pick:r.pick||"",totalEnds:r.totalEnds||"",totalMeters:r.totalMeters||"",tapeline:r.tapeline||"",cuts:r.cuts||"",warpYarns:r.warpYarns||[],weftYarns:r.weftYarns||[],crimp:r.crimp||"",actualKg:r.actualKg!=null&&r.actualKg!==""?r.actualKg:"",remarks:r.remarks||"",status:r.status||"In weaving"})};
   const cancelEdit=()=>{setEditId(null);sf(ini)};
   const all=[...M.weavers,...M.sizers];
   const sts=["In sizing","Sizing done","In weaving","Weaving done","Fabric received","On hold","Closed"];
-  const ini={date:today(),beamNo:"",weaver:"",designNo:"",reedSpace:"",reed:"",pick:"",totalEnds:"",totalMeters:"",warpYarns:[],weftYarns:[],crimp:"",actualKg:"",remarks:"",status:"In weaving"};
+  const ini={date:today(),beamType:"weaving",beamNo:"",weaver:"",designNo:"",reedSpace:"",reed:"",pick:"",totalEnds:"",totalMeters:"",tapeline:"",cuts:"",warpYarns:[],weftYarns:[],crimp:"",actualKg:"",remarks:"",status:"In weaving"};
   const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
   const[ws,setWs]=useState(""),[fts,setFts]=useState("");
   const[srch,setSrch]=useState(""),[fst,setFst]=useState("");
@@ -685,20 +699,24 @@ function PBms({firm,M,bms,fab,toast2,fname}){
   const updFPct=(t,v)=>s("weftYarns",f.weftYarns.map(y=>y.t===t?{...y,pct:+v||100}:y));
 
   // Live yarn consumption calculation
+  const isSizing=f.beamType==="sizing";
   const rs=parseRS(f.reedSpace),pick=+f.pick||0,ends=+f.totalEnds||0,meters=+f.totalMeters||0;
-  const hasCalc=rs>0&&pick>0&&ends>0&&meters>0;
+  // Sizing: auto-calculate meters from tapeline x cuts
+  const sizingMeters=isSizing&&f.tapeline&&f.cuts?(+f.tapeline*(+f.cuts||0)):0;
+  const calcMeters=isSizing?sizingMeters:meters;
+  const hasCalc=isSizing?(ends>0&&sizingMeters>0&&f.warpYarns.length>0):(rs>0&&pick>0&&ends>0&&meters>0);
 
   // Total warp Kg split by yarn % (crimp reduces effective meters)
   const crimpPct=(+f.crimp||0)/100;
-  const effMeters=meters>0?meters*(1-crimpPct):0;
+  const effMeters=calcMeters>0?calcMeters*(1-crimpPct):0;
   const totalWarpPct=f.warpYarns.reduce((a,y)=>a+(+y.pct||0),0)||1;
   const warpCalc=f.warpYarns.map(y=>{
     const totalWarp=calcWarpKgUnified(y.t,ends,effMeters,M);
     return{t:y.t,kg:totalWarp*(+y.pct||100)/totalWarpPct,spec:parseYarnSpec(y.t)};
   });
-  // Total weft Kg split by yarn %
+  // Total weft Kg split by yarn % (sizing has no weft)
   const totalWeftPct=f.weftYarns.reduce((a,y)=>a+(+y.pct||0),0)||1;
-  const weftCalc=f.weftYarns.map(y=>{
+  const weftCalc=isSizing?[]:f.weftYarns.map(y=>{
     const totalWeft=calcWeftKgUnified(y.t,rs,pick,effMeters,M);
     return{t:y.t,kg:totalWeft*(+y.pct||100)/totalWeftPct,spec:parseYarnSpec(y.t)};
   });
@@ -706,13 +724,24 @@ function PBms({firm,M,bms,fab,toast2,fname}){
 
   // Calc for saved beam record
   function beamCalc(r){
-    const rs2=parseRS(r.reedSpace),p=+r.pick||0,e=+r.totalEnds||0,m=+r.totalMeters||0;
-    if(!rs2||!p||!e||!m)return null;
-    const wy=(r.warpYarns||[]),fy=(r.weftYarns||[]);
-    const twp=wy.reduce((a,y)=>a+(+y.pct||0),0)||1;
-    const tfp=fy.reduce((a,y)=>a+(+y.pct||0),0)||1;
+    const e=+r.totalEnds||0,m=+r.totalMeters||0;
+    if(!e||!m)return null;
+    const wy=(r.warpYarns||[]);
     const crimpFrac=(+r.crimp||0)/100;
     const mEff=m*(1-crimpFrac);
+    if(r.beamType==="sizing"){
+      // Sizing: warp only, no weft
+      if(!wy.length)return null;
+      const twp=wy.reduce((a,y)=>a+(+y.pct||0),0)||1;
+      const items=wy.map(y=>({t:y.t,role:"warp",kg:calcWarpKgUnified(y.t,e,mEff,M)*(+y.pct||100)/twp}));
+      return{items,total:items.reduce((a,x)=>a+x.kg,0),effMeters:mEff};
+    }
+    // Weaving
+    const rs2=parseRS(r.reedSpace),p=+r.pick||0;
+    if(!rs2||!p)return null;
+    const fy=(r.weftYarns||[]);
+    const twp=wy.reduce((a,y)=>a+(+y.pct||0),0)||1;
+    const tfp=fy.reduce((a,y)=>a+(+y.pct||0),0)||1;
     const items=[
       ...wy.map(y=>({t:y.t,role:"warp",kg:calcWarpKgUnified(y.t,e,mEff,M)*(+y.pct||100)/twp})),
       ...fy.map(y=>({t:y.t,role:"weft",kg:calcWeftKgUnified(y.t,rs2,p,mEff,M)*(+y.pct||100)/tfp}))
@@ -721,7 +750,9 @@ function PBms({firm,M,bms,fab,toast2,fname}){
   }
 
   async function sub(){if(!f.beamNo||!f.weaver||!f.designNo){toast2("Fill required fields","err");return}
-    const save={...f,pick:+f.pick,totalEnds:+f.totalEnds,totalMeters:+f.totalMeters,crimp:f.crimp!==""?+f.crimp:0,actualKg:f.actualKg!==""?+f.actualKg:""};
+    const isSz=f.beamType==="sizing";
+    const totalM=isSz&&f.tapeline&&f.cuts?(+f.tapeline*(+f.cuts||0)):(+f.totalMeters);
+    const save={...f,pick:+f.pick||0,totalEnds:+f.totalEnds,totalMeters:totalM,tapeline:+f.tapeline||0,cuts:+f.cuts||0,crimp:f.crimp!==""?+f.crimp:0,actualKg:f.actualKg!==""?+f.actualKg:""};
     if(editId){await dbUpdate(firm,"beams",editId,save);setEditId(null);}
     else{await dbs(firm,"beams",uid(),save);}
     sf(ini);toast2(editId?"Beam updated!":"Beam saved!")}
@@ -734,15 +765,34 @@ function PBms({firm,M,bms,fab,toast2,fname}){
     pend>0&&h("div",{className:"ac wn",style:{marginBottom:12}},h("div",{className:"ac-ic"},"⚠️"),h("div",null,h("div",{className:"ac-t"},pend+" beam"+(pend>1?"s":"")+" pending fabric"),h("div",{className:"ac-s"},"Filter by status below to follow up"))),
     h("div",{className:"card"},
       editId&&h("div",{className:"edit-bar"},"✏️ Editing beam — ",h("button",{className:"btn btn-sm",style:{marginLeft:"auto"},onClick:cancelEdit},"Cancel")),
-      h("div",{className:"ct",style:{marginBottom:10}},editId?"Update beam":"New beam entry"),
+      h("div",{className:"ct",style:{marginBottom:8}},editId?"Update beam":"New beam entry"),
+      // ── WEAVING / SIZING TOGGLE ──
+      h("div",{className:"fsw",style:{marginBottom:12}},
+        h("button",{className:"fb"+(isSizing?"":" r"),onClick:()=>{sf(p=>({...p,beamType:"weaving",status:"In weaving",tapeline:"",cuts:""}))}},"🧵 Weaving"),
+        h("button",{className:"fb"+(isSizing?" r":""),onClick:()=>{sf(p=>({...p,beamType:"sizing",status:"In sizing",weftYarns:[]}))}},"📏 Sizing")
+      ),
+      // Common fields
       h("div",{className:"fr c2"},FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),FL("Beam No *",h("input",{value:f.beamNo,onChange:e=>s("beamNo",e.target.value),placeholder:"B-001"}))),
-      h("div",{className:"fr c2"},FL("Weaver / Sizer *",FS(f.weaver,v=>s("weaver",v),all)),FL("Design No *",h("input",{value:f.designNo,onChange:e=>s("designNo",e.target.value)}))),
-      h("div",{className:"fr c2"},FL("Status",FS(f.status,v=>s("status",v),sts)),FL("Reed space (inches)",h("input",{value:f.reedSpace,onChange:e=>s("reedSpace",e.target.value),placeholder:'44'}))),
-      h("div",{className:"fr c4"},
-        FL("Reed",h("input",{value:f.reed,onChange:e=>s("reed",e.target.value),placeholder:"68x2"})),
-        FL("Pick (per inch)",h("input",{type:"number",value:f.pick,onChange:e=>s("pick",e.target.value)})),
-        FL("Total ends",h("input",{type:"number",value:f.totalEnds,onChange:e=>s("totalEnds",e.target.value)})),
-        FL("Total meters",h("input",{type:"number",value:f.totalMeters,onChange:e=>s("totalMeters",e.target.value),placeholder:"meters to produce"}))
+      h("div",{className:"fr c2"},FL(isSizing?"Sizer *":"Weaver / Sizer *",FS(f.weaver,v=>s("weaver",v),isSizing?M.sizers:all)),FL("Design No *",h("input",{value:f.designNo,onChange:e=>s("designNo",e.target.value)}))),
+      h("div",{className:"fr c2"},FL("Status",FS(f.status,v=>s("status",v),sts)),FL("Total ends",h("input",{type:"number",value:f.totalEnds,onChange:e=>s("totalEnds",e.target.value)}))),
+
+      // ── SIZING-SPECIFIC FIELDS ──
+      isSizing&&h("div",null,
+        h("div",{className:"fr c2"},
+          FL("Tapeline (m per cut)",h("input",{type:"number",value:f.tapeline,onChange:e=>s("tapeline",e.target.value),placeholder:"e.g. 200"})),
+          FL("Cuts",h("input",{type:"number",value:f.cuts,onChange:e=>s("cuts",e.target.value),placeholder:"e.g. 50"}))
+        ),
+        h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"8px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:12}},
+          h("span",{style:{fontSize:12,color:"var(--mu)"}},"Total meters"),
+          h("span",{className:"mn fw5",style:{fontSize:17,color:"var(--in)"}},sizingMeters>0?fmt(sizingMeters)+" m":"Enter tapeline × cuts"),
+          sizingMeters>0&&h("span",{style:{fontSize:11,color:"var(--mu)"}},"= "+f.tapeline+" × "+f.cuts)
+        )
+      ),
+
+      // ── WEAVING-SPECIFIC FIELDS ──
+      !isSizing&&h("div",null,
+        h("div",{className:"fr c2"},FL("Reed space (inches)",h("input",{value:f.reedSpace,onChange:e=>s("reedSpace",e.target.value),placeholder:"44"})),FL("Total meters",h("input",{type:"number",value:f.totalMeters,onChange:e=>s("totalMeters",e.target.value),placeholder:"meters to produce"}))),
+        h("div",{className:"fr c2"},FL("Reed",h("input",{value:f.reed,onChange:e=>s("reed",e.target.value),placeholder:"68x2"})),FL("Pick (per inch)",h("input",{type:"number",value:f.pick,onChange:e=>s("pick",e.target.value)})))
       ),
       h("div",{className:"fr c2"},
         FL("Crimp % (warp)",h("input",{type:"number",value:f.crimp,onChange:e=>s("crimp",e.target.value),placeholder:"e.g. 3.5",title:"Warp crimp % — increases warp yarn consumption accordingly"})),
@@ -779,7 +829,7 @@ function PBms({firm,M,bms,fab,toast2,fname}){
       ),
       // ── LIVE YARN CONSUMPTION PANEL ──
       hasCalc&&(warpCalc.length>0||weftCalc.length>0)&&h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--rl)",padding:"10px 14px",marginBottom:8}},
-        h("div",{style:{fontSize:10,fontWeight:600,color:"var(--in)",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}},"📊 Estimated consumption for "+fmt(meters)+" m"+(crimpPct>0?" → "+fmt(Math.round(effMeters))+" m effective ("+f.crimp+"% crimp off)":"")),
+        h("div",{style:{fontSize:10,fontWeight:600,color:"var(--in)",textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}},"📊 "+(isSizing?"Sizing":"Weaving")+" yarn estimate — "+fmt(calcMeters)+" m"+(crimpPct>0?" → "+fmt(Math.round(effMeters))+" m effective ("+f.crimp+"% crimp off)":"")),
         h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}},
           warpCalc.length>0&&h("div",null,
             h("div",{style:{fontSize:10,color:"var(--mu)",marginBottom:4,fontWeight:600}},"WARP"),
@@ -820,7 +870,7 @@ function PBms({firm,M,bms,fab,toast2,fname}){
           "Polyester/denier: Warp = (D x Ends x m) / 9,000,000  .  Weft = (D x RS\" x PPI x m) / 9,000,000"
         )
       ),
-      !hasCalc&&(f.warpYarns.length>0||f.weftYarns.length>0)&&h("div",{style:{fontSize:12,color:"var(--mu)",background:"var(--wnb)",border:"1px solid #F0C98A",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:8}},"⚠ Enter Reed Space, Pick, Total Ends and Total Meters to see yarn consumption estimate."),
+      !hasCalc&&(f.warpYarns.length>0||f.weftYarns.length>0)&&h("div",{style:{fontSize:12,color:"var(--mu)",background:"var(--wnb)",border:"1px solid #F0C98A",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:8}},isSizing?"⚠ Enter Total Ends, Tapeline and Cuts to see yarn consumption estimate.":"⚠ Enter Reed Space, Pick, Total Ends and Total Meters to see yarn consumption estimate."),
       FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value),style:{marginBottom:8}})),
       h("button",{className:"btn btn-p btn-full",onClick:sub},editId?"Update Beam":"Save Beam")
     ),
@@ -847,7 +897,10 @@ function PBms({firm,M,bms,fab,toast2,fname}){
           const anyOvr=[...(r.warpYarns||[]),...(r.weftYarns||[])].some(y=>(M.yarnDenierOverride||{})[y.t]&&+((M.yarnDenierOverride||{})[y.t])>0);
           return h("tr",{key:i},
             Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(r.date))),
-            Td(h("span",{className:"bdg ba"},r.beamNo)),Td(r.weaver),
+            h("td",null,h("div",{style:{display:"flex",alignItems:"center",gap:4}},
+              h("span",{className:"bdg ba"},r.beamNo),
+              h("span",{className:"bdg "+(r.beamType==="sizing"?"bw":"bi"),style:{fontSize:9}},r.beamType==="sizing"?"📏":"🧵")
+            )),Td(r.weaver),
             h("td",null,h("div",null,
               h("span",{className:"bdg bi"},r.designNo),
               fabMatch.length>0&&h("span",{className:"bdg bo",style:{fontSize:9,marginLeft:4}},fabMatch.length>1?"✓ "+fabMatch.length+"x fab":"✓ fab rcvd")
@@ -883,6 +936,13 @@ function PTrf({firm,M,parties,trf,pBal,yBal,toast2,fname}){
   const ini={date:today(),yarnType:"",fromParty:"",toParty:"",qty:"",remarks:""};
   const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
 
+  // Yarns held by fromParty with qty (for yarn dropdown)
+  const partyYarnMap=f.fromParty?{}:null;
+  if(partyYarnMap){const py=(pBal[f.fromParty]||{});Object.entries(py).forEach(([yt,q])=>{partyYarnMap[yt]=(q||0)+(yt===f.yarnType&&editId?origQtyTrf:0);});}
+  const availYarnsTrf=partyYarnMap
+    ?Object.entries(partyYarnMap).filter(([yt,q])=>q>0||yt===f.yarnType).sort(([,a],[,b])=>b-a).map(([yt,q])=>({value:yt,label:yt+" ("+fmt(q)+" Kg)"}))
+    :M.yarnTypes.map(y=>({value:y,label:y}));
+
   // Live balance check for fromParty
   const partyNames2=new Set([...(M.weavers||[]),...(M.sizers||[])]);
   const sharedNamesT=new Set((M.godowns||[]).filter(g=>partyNames2.has(g)));
@@ -910,8 +970,13 @@ function PTrf({firm,M,parties,trf,pBal,yBal,toast2,fname}){
     h("div",{className:"card"},
       editId&&h("div",{className:"edit-bar"},"✏️ Editing transfer — ",h("button",{className:"btn btn-sm",style:{marginLeft:"auto"},onClick:cancelEdit},"Cancel")),
       h("div",{className:"ct",style:{marginBottom:10}},editId?"Update transfer":"Yarn transfer between weavers / sizers"),
-      h("div",{className:"fr c2"},FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),FL("Yarn type *",FS(f.yarnType,v=>s("yarnType",v),M.yarnTypes))),
-      h("div",{className:"fr c2"},FL("From party *",FS(f.fromParty,v=>s("fromParty",v),pn)),FL("To party *",FS(f.toParty,v=>s("toParty",v),pn))),
+      h("div",{className:"fr c2"},FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value)}))),
+      h("div",{className:"fr c2"},FL("From party *",FS(f.fromParty,v=>{s("fromParty",v);if(f.yarnType&&v){const q=(pBal[v]||{})[f.yarnType]||0;if(q<=0)s("yarnType","");}},pn)),FL("To party *",FS(f.toParty,v=>s("toParty",v),pn))),
+      FL("Yarn type *",h("div",null,
+        FSQ(f.yarnType,v=>s("yarnType",v),availYarnsTrf,f.fromParty?"— select yarn —":"Select from-party first"),
+        !f.fromParty&&h("div",{style:{fontSize:11,color:"var(--mu)",marginTop:3}},"👆 Select a party to see yarn they hold"),
+        f.fromParty&&availYarnsTrf.length===0&&h("div",{style:{fontSize:11,color:"var(--er)",marginTop:3}},"This party has no yarn to transfer")
+      )),
       // Live balance panel for fromParty
       fromBalForEdit!=null&&h("div",{style:{background:afterTrf!=null&&afterTrf<0?"var(--erb)":afterTrf!=null&&afterTrf<50?"var(--wnb)":"var(--okb)",border:"1px solid "+(afterTrf!=null&&afterTrf<0?"#F5C6C6":afterTrf!=null&&afterTrf<50?"#F0C98A":"#B8E5CB"),borderRadius:"var(--r)",padding:"8px 12px",marginBottom:8,display:"flex",gap:20,flexWrap:"wrap",alignItems:"center"}},
         h("div",null,
@@ -930,7 +995,6 @@ function PTrf({firm,M,parties,trf,pBal,yBal,toast2,fname}){
         afterTrf!=null&&afterTrf<0&&h("div",{style:{fontSize:12,color:"var(--er)",fontWeight:500}},"❌ Cannot transfer — would cause negative balance!")
       ),
       FL("Qty (Kg) *",h("input",{type:"number",value:f.qty,onChange:e=>s("qty",e.target.value),style:{marginBottom:8,borderColor:afterTrf!=null&&afterTrf<0?"var(--er)":""}})),
-      FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value),style:{marginBottom:8}})),
       h("button",{className:"btn btn-p btn-full",onClick:sub,disabled:afterTrf!=null&&afterTrf<0,style:{opacity:afterTrf!=null&&afterTrf<0?.5:1}},editId?"Update Transfer":"Save Transfer")
     ),
     h("div",{className:"card"},
@@ -1455,6 +1519,8 @@ function PHist({firm,delInw,delIss,delBms,delTrf,delFab,toast2}){
 // ── Helpers ──
 function FL(label,child){return h("div",{className:"fld"},h("label",null,label),child)}
 function FS(val,onChange,opts){return h("select",{value:val,onChange:e=>onChange(e.target.value)},h("option",{value:""},"Select..."),opts.map(o=>h("option",{key:o,value:o},o)))}
+// Select with value+label pairs [{value,label}] — shows qty in label
+function FSQ(val,fn,opts,placeholder){return h("select",{value:val,onChange:e=>fn(e.target.value),style:{height:32,fontSize:13}},h("option",{value:""},placeholder||"— select —"),...opts.map(o=>typeof o==="string"?h("option",{key:o,value:o},o):h("option",{key:o.value,value:o.value},o.label)));}
 function TH(cols){return cols.map(c=>h("th",{key:c},c))}
 function Td(child,cls=""){return h("td",{className:cls},child)}
 function Em(msg){return h("div",{className:"empty"},h("div",{className:"ei"},"📋"),h("p",null,msg))}
