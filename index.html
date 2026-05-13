@@ -213,7 +213,7 @@ const DEF={
   godowns:["Mill A","Mill B","Own Godown","Supplier X","Supplier Y"],
   weavers:["Ramesh Weaver","Suresh Loom","Karim Handloom","Ganesh Fabrics"],
   sizers:["Patel Sizing","Kumar Doubler","Singh Warp Prep"],
-  yarnRates:{},yarnMinStock:{},yarnDenierOverride:{},yarnSuppliers:[],pendingDays:15
+  yarnRates:{},yarnMinStock:{},yarnDenierOverride:{},yarnSuppliers:[],yarnMills:[],yarnGroups:[],pendingDays:15
 };
 
 // Root
@@ -308,9 +308,25 @@ function App(){
 
   const alerts=useMemo(()=>{
     const list=[];
+    // ── Yarn low stock alerts (group-aware) ──
     M.yarnTypes.forEach(yt=>{
       const min=+(M.yarnMinStock||{})[yt]||0;
-      if(min>0){const bal=yBalT[yt]||0;if(bal<min)list.push({type:"stock",level:bal<=0?"cr":"wn",title:"Low stock: "+yt,sub:"Balance: "+fmt(bal)+" Kg  Min: "+fmt(min)+" Kg"})}
+      if(min<=0)return;
+      const bal=yBalT[yt]||0;
+      if(bal>=min)return;
+      // Check group alternatives
+      const grp=findYarnGroup(M,yt);
+      const alts=grp?(grp.members||[]).filter(m=>m!==yt&&(yBalT[m]||0)>min):[];
+      if(alts.length>0){
+        // Same group has stock — suggest substitution
+        list.push({type:"stock",level:"wn",title:"Low stock: "+yt,sub:"Balance: "+fmt(bal)+" Kg (min: "+fmt(min)+" Kg) — ✓ Substitute available: "+alts.map(a=>a+" ("+fmt(yBalT[a]||0)+" Kg)").join(", ")+" ["+grp.name+" "+GRADE_LABELS[grp.grade||1]+"]"});
+      } else if(grp){
+        // Whole group is low
+        const grpTotal=grp.members.reduce((a,m)=>a+(yBalT[m]||0),0);
+        list.push({type:"stock",level:bal<=0?"cr":"wn",title:"Low stock: "+yt+" [Group: "+grp.name+"]",sub:"Balance: "+fmt(bal)+" Kg — entire "+GRADE_LABELS[grp.grade||1]+" group total: "+fmt(grpTotal)+" Kg"});
+      } else {
+        list.push({type:"stock",level:bal<=0?"cr":"wn",title:"Low stock: "+yt,sub:"Balance: "+fmt(bal)+" Kg  Min: "+fmt(min)+" Kg"});
+      }
     });
     // Negative godown balance alerts
     Object.entries(yBal).forEach(([k,q])=>{
@@ -374,12 +390,12 @@ function App(){
     {id:"fab",l:"Fabric Received",ic:"≋",g:"Transactions"},
     {id:"led",l:"Stock Ledger",ic:"≡",g:"Reports"},
     {id:"par",l:"Party Ledger",ic:"◈",g:"Reports"},
-    {id:"ynled",l:"Yarn Supplier",ic:"🏭",g:"Reports"},
+    {id:"ynled",l:"Yarn Mill",ic:"🏭",g:"Reports"},
     {id:"rep",l:"Performance",ic:"📊",g:"Reports"},
     {id:"hist",l:"History",ic:"🗑",g:"Reports"},
     {id:"mas",l:"Masters",ic:"⚙",g:"Settings"}
   ];
-  const ttls={dash:"Dashboard",alerts:"Alerts",inw:"Yarn Inward",iss:"Issue Yarn",bms:"Beam Register",trf:"Yarn Transfer",fab:"Fabric Received",led:"Stock Ledger",par:"Party Ledger",ynled:"Yarn Supplier Ledger",rep:"Performance",hist:"History (15 days)",mas:"Masters"};
+  const ttls={dash:"Dashboard",alerts:"Alerts",inw:"Yarn Inward",iss:"Issue Yarn",bms:"Beam Register",trf:"Yarn Transfer",fab:"Fabric Received",led:"Stock Ledger",par:"Party Ledger",ynled:"Yarn Mill Ledger",rep:"Performance",hist:"History (15 days)",mas:"Masters"};
   const ctx={firm,M,parties,inw,iss,bms,trf,fab,yBal,yBalT,pBal,bmConsumed,alerts,stockVal,toast2,updM,fname:FIRMS[firm].name,delInw,delIss,delBms,delTrf,delFab};
   const PGS={dash:PDash,alerts:PAlerts,inw:PInw,iss:PIss,bms:PBms,trf:PTrf,fab:PFab,led:PLed,par:PPar,ynled:PYarnLed,rep:PRep,hist:PHist,mas:PMas};
   const P=PGS[page]||PDash;
@@ -479,11 +495,24 @@ function PAlerts({alerts,M,updM}){
   );
 }
 
+// ── YARN GROUP HELPERS ──
+const GRADE_LABELS={1:"Grade 1 — Premium",2:"Grade 2 — Standard",3:"Grade 3 — Economy"};
+const GRADE_COLORS={1:"var(--ok)",2:"var(--wn)",3:"var(--mu)"};
+function findYarnGroup(M,yarnType){return(M.yarnGroups||[]).find(g=>(g.members||[]).includes(yarnType))||null;}
+function groupAlternatives(M,yarnType){const g=findYarnGroup(M,yarnType);return g?(g.members||[]).filter(m=>m!==yarnType):[];}
+function groupStock(M,yarnType,yBal,pBal){
+  const g=findYarnGroup(M,yarnType);if(!g)return null;
+  const members=g.members||[];
+  const gdTotal=members.reduce((a,yt)=>a+Object.entries(yBal).filter(([k])=>k.startsWith(yt+"||")).reduce((b,[,v])=>b+v,0),0);
+  const ptyTotal=members.reduce((a,yt)=>a+Object.values(pBal).reduce((b,py)=>b+(py[yt]||0),0),0);
+  return{group:g,gdTotal,ptyTotal,total:gdTotal+ptyTotal,members};
+}
+
 // ── YARN INWARD ──
 function PInw({firm,M,inw,parties,toast2,updM,fname}){
   const[editId,setEditId]=useState(null);
-  const ini={date:today(),supplier:"",destination:"",yarnType:"",lotNo:"",bags:"",kgPerBag:100,totalKg:"",ratePerKg:"",remarks:""};
-  const startEdit=(r)=>{setEditId(r._id);sf({date:r.date||today(),supplier:r.supplier||"",destination:r.destination||r.godown||"",yarnType:r.yarnType||"",lotNo:r.lotNo||"",bags:r.bags||"",kgPerBag:r.kgPerBag||100,totalKg:r.totalKg||"",ratePerKg:r.ratePerKg||"",remarks:r.remarks||""})};
+  const ini={date:today(),mill:"",supplier:"",destination:"",yarnType:"",lotNo:"",bags:"",kgPerBag:100,totalKg:"",ratePerKg:"",remarks:""};
+  const startEdit=(r)=>{setEditId(r._id);sf({date:r.date||today(),mill:r.mill||"",supplier:r.supplier||"",destination:r.destination||r.godown||"",yarnType:r.yarnType||"",lotNo:r.lotNo||"",bags:r.bags||"",kgPerBag:r.kgPerBag||100,totalKg:r.totalKg||"",ratePerKg:r.ratePerKg||"",remarks:r.remarks||""})};
   const cancelEdit=()=>{setEditId(null);sf(ini)};
   const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
   const[srch,setSrch]=useState(""),[fg,setFg]=useState(""),[fs,setFs]=useState("");
@@ -503,7 +532,7 @@ function PInw({firm,M,inw,parties,toast2,updM,fname}){
   };
 
   async function sub(){
-    if(!f.yarnType||!f.destination||!f.totalKg){toast2("Fill required fields","err");return}
+    if(!f.yarnType||!f.destination||!f.totalKg||!f.mill){toast2("Fill all required fields — Yarn Mill is mandatory","err");return}
     const save={...f,bags:+f.bags||0,kgPerBag:+f.kgPerBag||0,totalKg:+f.totalKg,ratePerKg:+f.ratePerKg||0,
       destType:computedDestType,
       godown:computedDestType==="godown"?f.destination:"" // backward compat
@@ -519,7 +548,7 @@ function PInw({firm,M,inw,parties,toast2,updM,fname}){
   const filt=[...inw].reverse().filter(r=>{
     const q=srch.toLowerCase();
     const dest=r.destination||r.godown;
-    return(!fg||dest===fg)&&(!fs||r.supplier===fs)&&(!q||[r.yarnType,r.lotNo,dest,r.supplier].some(x=>x&&x.toLowerCase().includes(q)));
+    return(!fg||dest===fg)&&(!fs||r.mill===fs)&&(!q||[r.yarnType,r.lotNo,dest,r.supplier,r.mill].some(x=>x&&x.toLowerCase().includes(q)));
   });
 
   const avgRates={};
@@ -544,6 +573,13 @@ function PInw({firm,M,inw,parties,toast2,updM,fname}){
       h("div",{className:"fr c2"},
         FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),
         FL("Yarn type *",h(AddSel,{val:f.yarnType,fn:v=>s("yarnType",v),opts:M.yarnTypes,placeholder:"Select yarn",onAdd:v=>updM("yarnTypes",[...M.yarnTypes,v])}))
+      ),
+      h("div",{className:"fr c2"},
+        FL("Yarn Mill *",h("div",null,
+          h(AddSel,{val:f.mill,fn:v=>s("mill",v),opts:M.yarnMills||[],placeholder:"Select spinning mill…",onAdd:v=>updM("yarnMills",[...(M.yarnMills||[]),v]),style:{borderColor:!f.mill?"var(--wn)":""}}),
+          !f.mill&&h("div",{style:{fontSize:11,color:"var(--wn)",marginTop:3}},"⚠ Mill is required — identifies the spinning mill that produced this yarn")
+        )),
+        FL("Supplier / Trader",h(AddSel,{val:f.supplier,fn:v=>s("supplier",v),opts:M.yarnSuppliers||[],placeholder:"Optional — if bought via trader",onAdd:v=>updM("yarnSuppliers",[...(M.yarnSuppliers||[]),v])}))
       ),
       h("div",{className:"fr c2"},
         FL("Received at *",h("div",null,
@@ -577,7 +613,6 @@ function PInw({firm,M,inw,parties,toast2,updM,fname}){
             h(AddPartyInline,{firm,M,updM,defaultType:"weaver",onAdded:v=>s("destination",v)})
           )
         )),
-        FL("Supplier / Company",h(AddSel,{val:f.supplier,fn:v=>s("supplier",v),opts:M.yarnSuppliers||[],placeholder:"Select or add supplier",onAdd:v=>updM("yarnSuppliers",[...(M.yarnSuppliers||[]),v])}))
       ),
       h("div",{className:"fr c2"},FL("Lot / Challan No",h("input",{value:f.lotNo,onChange:e=>s("lotNo",e.target.value)})),
         FL("Rate per Kg (₹)",h("input",{type:"number",value:f.ratePerKg,onChange:e=>s("ratePerKg",e.target.value),placeholder:"0"}))
@@ -596,12 +631,12 @@ function PInw({firm,M,inw,parties,toast2,updM,fname}){
 
     h("div",{className:"card"},
       h("div",{className:"chd"},h("div",{className:"ct"},"Register ("+inw.length+")"),h("div",{className:"bgrp"},
-        h("button",{className:"btn btn-sm btn-pr no-print",onClick:()=>prnt(fname,"Yarn Inward",["Date","Yarn","Supplier","Destination","Type","Lot","Bags","Total Kg","Rate/Kg","Value ₹","Remarks"],filt.map(r=>{const dest=r.destination||r.godown;const val=(+r.ratePerKg||0)*(+r.totalKg||0);return[fmtD(r.date),r.yarnType,r.supplier||"—",dest,r.destType==="party"?"Party":"Godown",r.lotNo,r.bags,fmt(r.totalKg),r.ratePerKg?"₹"+fmt(r.ratePerKg):"—",val?"₹"+fmt(val):"—",r.remarks];}))},"🖨 Print"),
-        h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("inward",["Date","Yarn","Supplier","Destination","Type","Lot","Bags","Total Kg","Rate/Kg","Value"],filt.map(r=>{const dest=r.destination||r.godown;return[fmtD(r.date),r.yarnType,r.supplier||"",dest,r.destType==="party"?"Party":"Godown",r.lotNo,r.bags,r.totalKg,r.ratePerKg||"",((+r.ratePerKg||0)*(+r.totalKg||0))||""];}))},"⬇ Excel")
+        h("button",{className:"btn btn-sm btn-pr no-print",onClick:()=>prnt(fname,"Yarn Inward",["Date","Yarn","Mill","Supplier","Destination","Type","Lot","Bags","Total Kg","Rate/Kg","Value ₹","Remarks"],filt.map(r=>{const dest=r.destination||r.godown;const val=(+r.ratePerKg||0)*(+r.totalKg||0);return[fmtD(r.date),r.yarnType,r.mill||"—",r.supplier||"—",dest,r.destType==="party"?"Party":"Godown",r.lotNo,r.bags,fmt(r.totalKg),r.ratePerKg?"₹"+fmt(r.ratePerKg):"—",val?"₹"+fmt(val):"—",r.remarks];}))},"🖨 Print"),
+        h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("inward",["Date","Yarn","Mill","Supplier","Destination","Type","Lot","Bags","Total Kg","Rate/Kg","Value"],filt.map(r=>{const dest=r.destination||r.godown;return[fmtD(r.date),r.yarnType,r.mill||"",r.supplier||"",dest,r.destType==="party"?"Party":"Godown",r.lotNo,r.bags,r.totalKg,r.ratePerKg||"",((+r.ratePerKg||0)*(+r.totalKg||0))||""];}))},"⬇ Excel")
       )),
       h("div",{className:"sbr"},
-        h("input",{placeholder:"Search yarn, lot, supplier...",value:srch,onChange:e=>setSrch(e.target.value)}),
-        h("select",{value:fs,onChange:e=>setFs(e.target.value),style:{height:34}},h("option",{value:""},"All suppliers"),suppliers.map(s=>h("option",{key:s,value:s},s))),
+        h("input",{placeholder:"Search yarn, lot, mill, supplier...",value:srch,onChange:e=>setSrch(e.target.value)}),
+        h("select",{value:fs,onChange:e=>setFs(e.target.value),style:{height:34}},h("option",{value:""},"All mills"),(M.yarnMills||[]).map(m=>h("option",{key:m,value:m},m))),
         h("select",{value:fg,onChange:e=>setFg(e.target.value),style:{height:34}},h("option",{value:""},"All destinations"),M.godowns.map(g=>h("option",{key:g,value:g},g)))
       ),
 
@@ -616,17 +651,18 @@ function PInw({firm,M,inw,parties,toast2,updM,fname}){
 
       filt.length===0?Em("No entries"):
       h("div",{className:"tw"},h("table",null,
-        h("thead",null,h("tr",null,TH(["Date","Yarn","Supplier","Received at","Lot","Kg","Rate/Kg","Value ₹",""]))),
+        h("thead",null,h("tr",null,TH(["Date","Yarn","Mill","Supplier","Received at","Lot","Kg","Rate/Kg","Value ₹",""]))),
         h("tbody",null,filt.map((r,i)=>{
           const dest=r.destination||r.godown;
           const val=(+r.ratePerKg||0)*(+r.totalKg||0);
           return h("tr",{key:i},
             Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(r.date))),
             Td(h("span",{className:"bdg bi"},r.yarnType)),
-            Td(r.supplier?h("span",{style:{fontWeight:500}},r.supplier):"—"),
+            h("td",null,h("span",{style:{fontWeight:600}},r.mill||h("span",{style:{color:"var(--er)",fontSize:11}},"⚠ No mill"))),
+            Td(r.supplier||"—","tm"),
             h("td",null,h("div",{style:{display:"flex",alignItems:"center",gap:4}},
               h("span",null,dest),
-              h("span",{className:"bdg "+(r.destType==="party"?"bo":"bw"),style:{fontSize:9}},r.destType==="party"?"👤 Party":"🏭 Godown")
+              h("span",{className:"bdg "+(r.destType==="party"?"bo":"bw"),style:{fontSize:9}},r.destType==="party"?"👤":"🏭")
             )),
             Td(r.lotNo||"—"),
             Td(h("span",{className:"mn fw5"},fmt(r.totalKg)+" Kg")),
@@ -1037,15 +1073,18 @@ function PBms({firm,M,bms,fab,pBal,yBal,toast2,updM,fname}){
             const req=reqMap[yt]||null;
             const shortfall=req!=null?Math.max(0,req-has):0;
             const ok=req==null||has>=req-0.5;
-            // Suggest godown
             const gdOpts=Object.entries(yBal).filter(([k,v])=>k.startsWith(yt+"||")&&v>0).map(([k,v])=>{const[,gd]=k.split("||");return{gd,qty:v}}).sort((a,b)=>b.qty-a.qty);
+            const grp=findYarnGroup(M,yt);
+            const altsInStock=grp?(grp.members||[]).filter(m=>m!==yt&&(weaverBal[m]||0)>0):[];
             return h("div",{key:yt,style:{padding:"4px 0",borderBottom:"1px solid var(--bdl)",display:"flex",flexWrap:"wrap",alignItems:"center",gap:8}},
               h("span",{style:{fontSize:12,flex:"0 0 auto",minWidth:120}},yt),
               h("span",{className:"mn",style:{fontSize:12,color:has===0?"var(--er)":has<50?"var(--wn)":"var(--ok)"}},fmt(has)+" Kg held"),
               req!=null&&h("span",{className:"mn",style:{fontSize:11,color:"var(--mu)"}},req.toFixed(1)+" Kg needed"),
               ok?h("span",{className:"bdg bo",style:{fontSize:9}},"✓ OK"):
                 h("span",{className:"bdg be",style:{fontSize:9}},fmt(shortfall.toFixed(1))+" Kg short"+(gdOpts.length>0?" → issue from "+gdOpts[0].gd+" ("+fmt(gdOpts[0].qty)+" Kg)":"")),
-              !ok&&gdOpts.length===0&&h("span",{style:{fontSize:10,color:"var(--er)"}},"No godown stock!")
+              !ok&&gdOpts.length===0&&h("span",{style:{fontSize:10,color:"var(--er)"}},"No godown stock!"),
+              grp&&h("span",{className:"bdg",style:{fontSize:9,background:"var(--bg)",color:"var(--mu)",border:"1px solid var(--bdl)"}},"🏷 "+grp.name+" G"+(grp.grade||1)),
+              !ok&&altsInStock.length>0&&h("span",{style:{fontSize:10,color:"var(--in)"}},"✓ Group sub: "+altsInStock.map(a=>a+" ("+fmt(weaverBal[a])+"Kg)").join(", "))
             );
           })
         );
@@ -1403,7 +1442,7 @@ function PLed({yBal,yBalT,pBal,bmConsumed,inw,iss,trf,fab,M,parties,firm,toast2,
     ...locRows.filter(e=>e.q<0).map(e=>e.yt+" @ "+e.loc+": "+fmt(e.q)+" Kg")
   ];
 
-  const viewBtns=[{id:"location",l:"📍 Location"},{id:"godown",l:"Godown"},{id:"party",l:"Party"},{id:"fabric",l:"🧵 Fabric"},{id:"summary",l:"Summary"}];
+  const viewBtns=[{id:"location",l:"📍 Location"},{id:"groups",l:"🏷 Groups"},{id:"godown",l:"Godown"},{id:"party",l:"Party"},{id:"fabric",l:"🧵 Fabric"},{id:"summary",l:"Summary"}];
 
   const locTypeLabel=(row)=>{
     if(row.isOwn)return h("span",{className:"bdg ba",style:{fontSize:9}},"🏭 Own");
@@ -1445,6 +1484,69 @@ function PLed({yBal,yBalT,pBal,bmConsumed,inw,iss,trf,fab,M,parties,firm,toast2,
         FL("Filter yarn",h("select",{value:fy,onChange:e=>setFy(e.target.value)},h("option",{value:""},"All yarns"),M.yarnTypes.map(y=>h("option",{key:y,value:y},y)))),
         view==="godown"?FL("Filter godown",h("select",{value:fg,onChange:e=>setFg(e.target.value)},h("option",{value:""},"All godowns"),M.godowns.map(g=>h("option",{key:g,value:g},g)))):h("div",null)
       ),
+
+      // ── 🏷 GROUPS VIEW ──
+      view==="groups"&&(()=>{
+        const groups=M.yarnGroups||[];
+        if(groups.length===0)return h("div",null,Em("No yarn groups yet."),h("div",{style:{textAlign:"center",marginTop:8,fontSize:12,color:"var(--mu)"}},"Go to Masters → Yarn Groups to create groups and assign yarns."));
+        return h("div",null,
+          h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:10,fontSize:11,color:"var(--in)",lineHeight:1.6}},"🏷 Groups show combined stock across all member yarns. Yarns in the same group and grade are interchangeable substitutes."),
+          [1,2,3].map(grade=>{
+            const gradeGroups=groups.filter(g=>(+g.grade||1)===grade);
+            if(!gradeGroups.length)return null;
+            return h("div",{key:grade,style:{marginBottom:16}},
+              h("div",{style:{fontWeight:600,fontSize:13,color:GRADE_COLORS[grade],marginBottom:8,display:"flex",gap:8,alignItems:"center"}},
+                h("span",{className:"bdg",style:{background:grade===1?"#D1FAE5":grade===2?"#FEF3C7":"#F3F4F6",color:GRADE_COLORS[grade],border:"1px solid currentColor",fontSize:11}},GRADE_LABELS[grade]),
+                h("span",{style:{fontSize:11,color:"var(--mu)"}},gradeGroups.length+" group"+(gradeGroups.length>1?"s":""))
+              ),
+              gradeGroups.map(grp=>{
+                const members=grp.members||[];
+                const mData=members.map(yt=>{
+                  const gd=Object.entries(yBal).filter(([k])=>k.startsWith(yt+"||")).reduce((a,[,v])=>a+v,0);
+                  const pty=Object.values(pBal).reduce((a,py)=>a+(py[yt]||0),0);
+                  const total=gd+pty,min=+((M.yarnMinStock||{})[yt])||0,rt=+((M.yarnRates||{})[yt])||0;
+                  return{yt,gd,pty,total,min,rt};
+                });
+                const grpTotal=mData.reduce((a,d)=>a+d.total,0);
+                const grpVal=mData.reduce((a,d)=>a+d.total*d.rt,0);
+                const anyLow=mData.some(d=>d.min>0&&d.total<d.min);
+                const allOut=mData.every(d=>d.total<=0);
+                return h("div",{key:grp.id||grp.name,style:{marginBottom:12,border:"1px solid var(--bdl)",borderRadius:"var(--rl)",overflow:"hidden"}},
+                  h("div",{style:{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:allOut?"#FFF1F2":anyLow?"#FFFBEB":"var(--okb)",borderBottom:"1px solid var(--bdl)"}},
+                    h("div",{style:{flex:1}},
+                      h("div",{style:{fontWeight:600,fontSize:14}},grp.name),
+                      grp.description&&h("div",{style:{fontSize:11,color:"var(--mu)"}},grp.description)
+                    ),
+                    h("div",{style:{textAlign:"right"}},
+                      h("div",{className:"mn fw5",style:{fontSize:15,color:allOut?"var(--er)":anyLow?"var(--wn)":"var(--ok)"}},fmt(grpTotal)+" Kg"),
+                      grpVal>0&&h("div",{style:{fontSize:11,color:"var(--mu)"}},"₹"+fmt(grpVal)),
+                      allOut&&h("span",{className:"bdg be",style:{fontSize:9}},"ALL OUT"),
+                      !allOut&&anyLow&&h("span",{className:"bdg bw",style:{fontSize:9}},"SOME LOW")
+                    )
+                  ),
+                  h("div",{className:"tw"},h("table",null,
+                    h("thead",null,h("tr",null,TH(["Yarn type","Godown Kg","Party Kg","Total","Min","Status","Substitute if low"]))),
+                    h("tbody",null,mData.map(d=>{
+                      const isLow=d.min>0&&d.total<d.min;
+                      const altStr=mData.filter(o=>o.yt!==d.yt&&o.total>0).map(o=>o.yt+" ("+fmt(o.total)+"Kg)").join(" / ");
+                      return h("tr",{key:d.yt,style:{background:d.total<=0?"#FFF5F5":""}},
+                        h("td",{style:{padding:"6px 10px"}},h("span",{className:"bdg bi",style:{fontSize:10}},d.yt)),
+                        Td(fmt(d.gd)+" Kg","mn"),Td(d.pty>0?fmt(d.pty)+" Kg":"—","mn"),
+                        h("td",null,h("span",{className:"mn fw5",style:{color:d.total<=0?"var(--er)":isLow?"var(--wn)":"var(--ok)"}},fmt(d.total)+" Kg")),
+                        Td(d.min?fmt(d.min)+" Kg":"—","mn tm"),
+                        Td(h("span",{className:"bdg "+(d.total<=0?"be":isLow?"bw":"bo")},d.total<=0?"Out":isLow?"Low":"OK")),
+                        h("td",{style:{padding:"6px 10px",fontSize:11,color:altStr?"var(--in)":"var(--mu)"}},
+                          (isLow||d.total<=0)&&altStr?h("span",null,"✓ "+altStr):"—"
+                        )
+                      );
+                    }))
+                  ))
+                );
+              })
+            );
+          })
+        );
+      })(),
 
       // ── 📍 LOCATION VIEW (default) ──
       view==="location"&&h("div",null,
@@ -1817,6 +1919,69 @@ function PMas({M,updM,toast2}){
     const rm=async(item)=>{await updM(mk,items.filter(x=>x!==item));toast2(item+" removed")};
     return h("div",{className:"card"},h("div",{className:"ct",style:{marginBottom:10}},title),h("div",{className:"addr"},h("input",{value:v,onChange:e=>setV(e.target.value),onKeyDown:e=>e.key==="Enter"&&add(),placeholder:"Add..."}),h("button",{className:"btn btn-p btn-sm",onClick:add},"+ Add")),items.length===0?h("p",{className:"tm",style:{fontSize:12}},"No items."):items.map(item=>h("div",{key:item,className:"ml-i"},h("span",{style:{fontSize:13}},h("span",{style:{marginRight:7,opacity:.4}},ic),item),h("button",{className:"btn btn-sm btn-del",onClick:()=>rm(item)},"Remove"))));
   }
+  function YarnGroupsM(){
+    const groups=M.yarnGroups||[];
+    const[name,setName]=useState("");const[desc,setDesc]=useState("");const[grade,setGrade]=useState(1);
+    const[editIdx,setEditIdx]=useState(null);
+    const addGroup=async()=>{
+      if(!name.trim())return;
+      const newG={id:uid(),name:name.trim(),description:desc.trim(),grade:+grade,members:[]};
+      await updM("yarnGroups",[...groups,newG]);setName("");setDesc("");setGrade(1);
+    };
+    const rmGroup=async(id)=>updM("yarnGroups",groups.filter(g=>g.id!==id));
+    const toggleMember=async(grpId,yt)=>{
+      await updM("yarnGroups",groups.map(g=>{
+        if(g.id!==grpId)return g;
+        const mems=g.members||[];
+        return{...g,members:mems.includes(yt)?mems.filter(m=>m!==yt):[...mems,yt]};
+      }));
+    };
+    const setGroupGrade=async(grpId,g)=>updM("yarnGroups",groups.map(gr=>gr.id===grpId?{...gr,grade:+g}:gr));
+    return h("div",{className:"card"},
+      h("div",{className:"ct",style:{marginBottom:10}},"Yarn Groups — Grade & Substitution"),
+      h("div",{style:{fontSize:11,color:"var(--mu)",background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"7px 10px",marginBottom:10,lineHeight:1.6}},
+        "💡 Group yarn types that are interchangeable substitutes (e.g. all Grade 1 60s Cotton from different mills). Grade 1 = Premium, Grade 2 = Standard, Grade 3 = Economy. When a yarn is low, the system suggests same-group alternatives."
+      ),
+      // Add group form
+      h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,alignItems:"flex-end"}},
+        h("div",null,h("label",{style:{fontSize:11,color:"var(--mu)"}},  "Group name"),h("input",{value:name,onChange:e=>setName(e.target.value),onKeyDown:e=>e.key==="Enter"&&addGroup(),placeholder:"e.g. 60s Cotton",style:{height:32,fontSize:13}})),
+        h("div",null,h("label",{style:{fontSize:11,color:"var(--mu)"}},"Grade"),h("select",{value:grade,onChange:e=>setGrade(e.target.value),style:{height:32,fontSize:13}},h("option",{value:1},"1 — Premium"),h("option",{value:2},"2 — Standard"),h("option",{value:3},"3 — Economy"))),
+        h("div",null,h("label",{style:{fontSize:11,color:"var(--mu)"}},"Description (optional)"),h("input",{value:desc,onChange:e=>setDesc(e.target.value),placeholder:"Brief note…",style:{height:32,fontSize:13,minWidth:180}})),
+        h("button",{className:"btn btn-p btn-sm",onClick:addGroup,style:{alignSelf:"flex-end"}},"+ Add group")
+      ),
+      // Existing groups
+      groups.length===0?Em("No groups yet. Add one above."):
+      [1,2,3].map(g=>{
+        const gradeGrps=groups.filter(gr=>(+gr.grade||1)===g);
+        if(!gradeGrps.length)return null;
+        return h("div",{key:g,style:{marginBottom:12}},
+          h("div",{style:{fontWeight:600,fontSize:12,color:GRADE_COLORS[g],marginBottom:6}},GRADE_LABELS[g]),
+          gradeGrps.map(grp=>h("div",{key:grp.id,style:{border:"1px solid var(--bdl)",borderRadius:"var(--r)",marginBottom:8,overflow:"hidden"}},
+            h("div",{style:{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"var(--bg)"}},
+              h("div",{style:{flex:1}},
+                h("span",{style:{fontWeight:500}},grp.name),
+                grp.description&&h("span",{style:{fontSize:11,color:"var(--mu)",marginLeft:6}},grp.description)
+              ),
+              h("select",{value:grp.grade||1,onChange:e=>setGroupGrade(grp.id,e.target.value),style:{height:28,fontSize:11}},
+                h("option",{value:1},"G1"),h("option",{value:2},"G2"),h("option",{value:3},"G3")
+              ),
+              h("button",{className:"btn btn-sm btn-del",onClick:()=>rmGroup(grp.id)},"Del")
+            ),
+            h("div",{style:{padding:"8px 12px",display:"flex",flexWrap:"wrap",gap:6}},
+              h("div",{style:{width:"100%",fontSize:11,color:"var(--mu)",marginBottom:4}},"Click yarn types to add/remove from this group:"),
+              (M.yarnTypes||[]).map(yt=>{
+                const isMember=(grp.members||[]).includes(yt);
+                return h("button",{key:yt,onClick:()=>toggleMember(grp.id,yt),
+                  style:{padding:"3px 10px",fontSize:11,borderRadius:12,cursor:"pointer",border:"1px solid "+(isMember?"var(--acc)":"var(--bdl)"),background:isMember?"var(--acc)":"var(--bg)",color:isMember?"#fff":"var(--tx)",fontWeight:isMember?600:400}
+                },yt);
+              })
+            )
+          ))
+        );
+      })
+    );
+  }
+
   function YarnSuppliersM(){
     const items=M.yarnSuppliers||[];const[v,setV]=useState("");
     const add=async()=>{if(!v.trim()||items.includes(v.trim()))return;await updM("yarnSuppliers",[...items,v.trim()]);setV("")};
@@ -1852,10 +2017,12 @@ function PMas({M,updM,toast2}){
       ))
     );
   }
-  const tabs=[{id:"yarn",l:"Yarn types"},{id:"suppliers",l:"Suppliers"},{id:"godowns",l:"Godowns"},{id:"weavers",l:"Weavers"},{id:"sizers",l:"Sizers"}];
+  const tabs=[{id:"yarn",l:"Yarn types"},{id:"groups",l:"🏷 Yarn Groups"},{id:"mills",l:"🏭 Mills"},{id:"suppliers",l:"Suppliers"},{id:"godowns",l:"Godowns"},{id:"weavers",l:"Weavers"},{id:"sizers",l:"Sizers"}];
   return h("div",null,
     h("div",{style:{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}},tabs.map(t=>h("button",{key:t.id,className:"btn"+(tab===t.id?" btn-p":""),style:{height:32,fontSize:12},onClick:()=>setTab(t.id)},t.l))),
     tab==="yarn"&&h(YarnM,null),
+    tab==="groups"&&h(YarnGroupsM,null),
+    tab==="mills"&&h(ML,{title:"Yarn Mills (spinning mills)",mk:"yarnMills",ic:"🏭"}),
     tab==="suppliers"&&h(YarnSuppliersM,null),
     tab==="godowns"&&h(ML,{title:"Godowns / Mills",mk:"godowns",ic:"🏭"}),
     tab==="weavers"&&h(ML,{title:"Weavers",mk:"weavers",ic:"👤"}),
@@ -1867,111 +2034,112 @@ function PMas({M,updM,toast2}){
 
 // ── YARN SUPPLIER LEDGER ──
 function PYarnLed({inw,M,fname}){
-  const[sel,setSel]=useState(""),[fy,setFy]=useState(""),[fd1,setFd1]=useState(""),[fd2,setFd2]=useState("");
+  const[selMill,setSelMill]=useState("");const[selSup,setSelSup]=useState("");
+  const[fy,setFy]=useState("");const[fd1,setFd1]=useState("");const[fd2,setFd2]=useState("");
+  const mills=[...new Set(inw.map(r=>r.mill).filter(Boolean))].sort();
   const suppliers=[...new Set(inw.map(r=>r.supplier).filter(Boolean))].sort();
-
   const filt=inw.filter(r=>{
-    if(sel&&r.supplier!==sel)return false;
+    if(selMill&&r.mill!==selMill)return false;
+    if(selSup&&r.supplier!==selSup)return false;
     if(fy&&r.yarnType!==fy)return false;
     if(fd1&&r.date<fd1)return false;
     if(fd2&&r.date>fd2)return false;
     return true;
   });
-
-  // Group by supplier
-  const supMap={};
+  const millMap={};
   filt.forEach(r=>{
-    const sup=r.supplier||"(No supplier)";
-    if(!supMap[sup])supMap[sup]={entries:[],totalKg:0,totalVal:0,yarns:{}};
-    supMap[sup].entries.push(r);
-    supMap[sup].totalKg+=(+r.totalKg||0);
+    const mill=r.mill||"(No mill — update entry)";
+    const sup=r.supplier||"(Direct from mill)";
+    if(!millMap[mill])millMap[mill]={totalKg:0,totalVal:0,yarns:{},suppliers:{}};
+    millMap[mill].totalKg+=(+r.totalKg||0);
     const val=(+r.ratePerKg||0)*(+r.totalKg||0);
-    supMap[sup].totalVal+=val;
-    const yt=r.yarnType;
-    if(!supMap[sup].yarns[yt])supMap[sup].yarns[yt]={kg:0,val:0};
-    supMap[sup].yarns[yt].kg+=(+r.totalKg||0);
-    supMap[sup].yarns[yt].val+=val;
+    millMap[mill].totalVal+=val;
+    if(!millMap[mill].yarns[r.yarnType])millMap[mill].yarns[r.yarnType]={kg:0,val:0,entries:[]};
+    millMap[mill].yarns[r.yarnType].kg+=(+r.totalKg||0);
+    millMap[mill].yarns[r.yarnType].val+=val;
+    millMap[mill].yarns[r.yarnType].entries.push(r);
+    if(!millMap[mill].suppliers[sup])millMap[mill].suppliers[sup]={kg:0};
+    millMap[mill].suppliers[sup].kg+=(+r.totalKg||0);
   });
-
   const grandKg=filt.reduce((a,r)=>a+(+r.totalKg||0),0);
   const grandVal=filt.reduce((a,r)=>a+((+r.ratePerKg||0)*(+r.totalKg||0)),0);
   const grandAvg=grandKg>0?grandVal/grandKg:0;
-
   return h("div",null,
     h("div",{className:"card"},
-      h("div",{className:"ct",style:{marginBottom:10}},"Yarn Supplier Ledger"),
+      h("div",{className:"ct",style:{marginBottom:10}},"Yarn Mill Ledger"),
       h("div",{className:"fr c2"},
-        FL("Supplier",h("select",{value:sel,onChange:e=>setSel(e.target.value)},h("option",{value:""},"All suppliers"),suppliers.map(s=>h("option",{key:s,value:s},s)))),
+        FL("Yarn Mill",h("select",{value:selMill,onChange:e=>setSelMill(e.target.value)},h("option",{value:""},"All mills"),mills.map(m=>h("option",{key:m,value:m},m)))),
         FL("Yarn type",FS(fy,v=>setFy(v),M.yarnTypes))
       ),
       h("div",{className:"fr c2"},
-        FL("From date",h("input",{type:"date",value:fd1,onChange:e=>setFd1(e.target.value)})),
-        FL("To date",h("input",{type:"date",value:fd2,onChange:e=>setFd2(e.target.value)}))
+        FL("Supplier / Trader",h("select",{value:selSup,onChange:e=>setSelSup(e.target.value)},h("option",{value:""},"All suppliers"),suppliers.map(s=>h("option",{key:s,value:s},s)))),
+        FL("Date range",h("div",{style:{display:"flex",gap:4,alignItems:"center"}},h("input",{type:"date",value:fd1,onChange:e=>setFd1(e.target.value),style:{flex:1}}),h("span",{style:{color:"var(--mu)"}},"-"),h("input",{type:"date",value:fd2,onChange:e=>setFd2(e.target.value),style:{flex:1}})))
       ),
-      // Grand totals bar
-      grandKg>0&&h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",marginBottom:4}},
+      grandKg>0&&h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",marginTop:4}},
         h("span",{className:"bdg ba mn"},fmt(grandKg)+" Kg total"),
-        grandVal>0&&h("span",{className:"bdg bo mn"},"₹"+fmt(grandVal)+" total"),
-        grandAvg>0&&h("span",{className:"bdg bw mn"},"avg ₹"+fmt(grandAvg.toFixed(0))+"/Kg"),
-        h("button",{className:"btn btn-sm btn-xl no-print",style:{marginLeft:"auto"},onClick:()=>csvDL("yarn-supplier-ledger",["Supplier","Date","Yarn","Destination","Lot","Kg","Rate/Kg","Value ₹"],filt.map(r=>{const dest=r.destination||r.godown;const val=(+r.ratePerKg||0)*(+r.totalKg||0);return[r.supplier||"",fmtD(r.date),r.yarnType,dest,r.lotNo||"",r.totalKg,r.ratePerKg||"",val||""]}))},"⬇ Excel")
+        grandVal>0&&h("span",{className:"bdg bo mn"},"\u20b9"+fmt(grandVal)+" total"),
+        grandAvg>0&&h("span",{className:"bdg bw mn"},"avg \u20b9"+fmt(grandAvg.toFixed(0))+"/Kg"),
+        h("button",{className:"btn btn-sm btn-xl no-print",style:{marginLeft:"auto"},onClick:()=>csvDL("yarn-mill-ledger",["Mill","Date","Yarn","Supplier","Destination","Lot","Kg","Rate/Kg","Value"],filt.map(r=>{const dest=r.destination||r.godown;const val=(+r.ratePerKg||0)*(+r.totalKg||0);return[r.mill||"",fmtD(r.date),r.yarnType,r.supplier||"",dest,r.lotNo||"",r.totalKg,r.ratePerKg||"",val||""]}))},"\u2b07 Excel")
       )
     ),
-    // Per-supplier cards
-    Object.entries(supMap).sort(([a],[b])=>a.localeCompare(b)).map(([sup,data])=>{
+    Object.entries(millMap).sort(([a],[b])=>a.localeCompare(b)).map(([mill,data])=>{
       const avg=data.totalKg>0?data.totalVal/data.totalKg:0;
-      return h("div",{key:sup,className:"card",style:{marginBottom:12}},
-        // Supplier header
+      const isMissing=mill.startsWith("(No mill");
+      return h("div",{key:mill,className:"card",style:{marginBottom:12,borderLeft:isMissing?"4px solid var(--wn)":"4px solid var(--acc)"}},
         h("div",{style:{display:"flex",alignItems:"center",gap:10,marginBottom:10,paddingBottom:8,borderBottom:"2px solid var(--bdl)"}},
           h("div",{style:{flex:1}},
-            h("div",{style:{fontWeight:600,fontSize:15}},sup),
-            h("div",{style:{fontSize:11,color:"var(--mu)",marginTop:2}},data.entries.length+" entries")
+            h("div",{style:{fontWeight:700,fontSize:16,display:"flex",alignItems:"center",gap:6}},
+              h("span",null,"\ud83c\udff7"),h("span",null,mill),
+              isMissing&&h("span",{className:"bdg be",style:{fontSize:9}},"Missing")
+            ),
+            Object.keys(data.suppliers).length>0&&h("div",{style:{fontSize:11,color:"var(--mu)",marginTop:3}},
+              "Traders: "+Object.entries(data.suppliers).map(([s,d])=>s+" ("+fmt(d.kg)+" Kg)").join(" \u00b7 ")
+            )
           ),
           h("div",{style:{textAlign:"right"}},
-            h("div",{className:"mn fw5",style:{fontSize:16}},fmt(data.totalKg)+" Kg"),
-            data.totalVal>0&&h("div",{style:{fontSize:12,color:"var(--ok)"}},  "₹"+fmt(data.totalVal)),
-            avg>0&&h("div",{className:"tm",style:{fontSize:11}},"avg ₹"+fmt(avg.toFixed(0))+"/Kg")
+            h("div",{className:"mn fw5",style:{fontSize:17}},fmt(data.totalKg)+" Kg"),
+            data.totalVal>0&&h("div",{style:{fontSize:12,color:"var(--ok)"}},"\u20b9"+fmt(data.totalVal)),
+            avg>0&&h("div",{className:"tm",style:{fontSize:11}},"avg \u20b9"+fmt(avg.toFixed(0))+"/Kg")
           )
         ),
-        // Yarn breakdown badges
-        h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}},
+        h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}},
           Object.entries(data.yarns).map(([yt,d])=>{
             const yAvg=d.kg>0?d.val/d.kg:0;
             return h("div",{key:yt,style:{background:"var(--bg)",border:"1px solid var(--bdl)",borderRadius:"var(--r)",padding:"5px 10px",fontSize:11}},
               h("span",{className:"bdg bi",style:{fontSize:9,marginRight:4}},yt),
               h("span",{className:"mn"},fmt(d.kg)+" Kg"),
-              yAvg>0&&h("span",{className:"tm",style:{marginLeft:5}},"₹"+fmt(yAvg.toFixed(0))+"/Kg"),
-              d.val>0&&h("span",{className:"tm",style:{marginLeft:4}},"• ₹"+fmt(d.val))
+              yAvg>0&&h("span",{className:"tm",style:{marginLeft:5}},"\u20b9"+fmt(yAvg.toFixed(0))+"/Kg"),
+              d.val>0&&h("span",{className:"tm",style:{marginLeft:4}},"\u2022 \u20b9"+fmt(d.val))
             );
           })
         ),
-        // Transaction table
         h("div",{className:"tw"},h("table",null,
-          h("thead",null,h("tr",null,TH(["Date","Yarn","Destination","Lot","Kg","Rate/Kg","Value ₹"]))),
+          h("thead",null,h("tr",null,TH(["Date","Yarn","Supplier","Received at","Lot","Kg","Rate/Kg","Value \u20b9"]))),
           h("tbody",null,
-            [...data.entries].sort((a,b)=>a.date.localeCompare(b.date)).map((r,i)=>{
-              const dest=r.destination||r.godown;
-              const val=(+r.ratePerKg||0)*(+r.totalKg||0);
+            Object.values(data.yarns).flatMap(d=>d.entries).sort((a,b)=>a.date.localeCompare(b.date)).map((r,i)=>{
+              const dest=r.destination||r.godown;const val=(+r.ratePerKg||0)*(+r.totalKg||0);
               return h("tr",{key:i},
                 Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(r.date))),
                 Td(h("span",{className:"bdg bi"},r.yarnType)),
-                h("td",null,h("div",{style:{display:"flex",gap:4}},h("span",null,dest),h("span",{className:"bdg "+(r.destType==="party"?"bo":"bw"),style:{fontSize:9}},r.destType==="party"?"Party":"Godown"))),
+                Td(r.supplier||"—","mn"),
+                h("td",null,h("div",{style:{display:"flex",gap:4}},h("span",null,dest),h("span",{className:"bdg "+(r.destType==="party"?"bo":"bw"),style:{fontSize:9}},r.destType==="party"?"\ud83d\udc64":"\ud83c\udfe0"))),
                 Td(r.lotNo||"—"),
                 Td(h("span",{className:"mn fw5"},fmt(r.totalKg)+" Kg")),
-                Td(r.ratePerKg?"₹"+fmt(r.ratePerKg):"—","mn"),
-                Td(val?"₹"+fmt(val):"—","mn")
+                Td(r.ratePerKg?"\u20b9"+fmt(r.ratePerKg):"—","mn"),
+                Td(val?"\u20b9"+fmt(val):"—","mn")
               );
             }),
             h("tr",{style:{background:"var(--bg)",fontWeight:600}},
-              h("td",{colSpan:4,style:{fontSize:12}},"Total"),
+              h("td",{colSpan:5,style:{fontSize:12,padding:"6px 10px"}},"Total from "+mill),
               Td(h("span",{className:"lp"},fmt(data.totalKg)+" Kg")),
-              Td(avg>0?"₹"+fmt(avg.toFixed(0))+" avg":"—","mn"),
-              Td(data.totalVal?"₹"+fmt(data.totalVal):"—","mn lp")
+              Td(avg>0?"\u20b9"+fmt(avg.toFixed(0))+" avg":"—","mn"),
+              Td(data.totalVal?"\u20b9"+fmt(data.totalVal):"—","mn lp")
             )
           )
         ))
       );
     }),
-    Object.keys(supMap).length===0&&Em("No inward entries match your filters.")
+    Object.keys(millMap).length===0&&Em("No inward entries match your filters.")
   );
 }
 
