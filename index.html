@@ -168,6 +168,7 @@ tr:hover td{background:#FDFAF5}
 <div id="r"></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script>
@@ -2297,29 +2298,129 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
   const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
   const[srch,setSrch]=useState(""),[fc,setFc]=useState("");
 
+  // ── Google Sheets sync ──
+  const GS_KEY="tsm_gs_url_"+firm;
+  const DEFAULT_GS_URL="https://script.google.com/macros/s/AKfycbyFZuKcgMGEkA6GHv8BV3VhMd2vpG4RPmEb9bb5ZnWuS8i4WWCf0jT9FVYt1z0kAoXjcA/exec";
+  const[gsUrl,setGsUrl]=useState(()=>localStorage.getItem(GS_KEY)||DEFAULT_GS_URL);
+  const[gsUrlInput,setGsUrlInput]=useState(()=>localStorage.getItem(GS_KEY)||DEFAULT_GS_URL);
+  const[gsOpen,setGsOpen]=useState(false);
+  const[gsSyncing,setGsSyncing]=useState(false);
+  const saveGsUrl=()=>{const v=gsUrlInput.trim();localStorage.setItem(GS_KEY,v);setGsUrl(v);setGsOpen(false);toast2(v?"Google Sheets URL saved! ✓":"Google Sheets disconnected","ok");};
+  async function syncToSheets(rec){
+    if(!gsUrl)return;
+    try{
+      setGsSyncing(true);
+      const row=[rec.date,rec.challanNo||"",rec.customer,rec.designNo,rec.taka||"",rec.meters,rec.rate,rec.taxable,rec.discountPct||0,rec.afterDisc,rec.sgst,rec.cgst,rec.total,rec.deliveryPlace||"",rec.transporter||"",rec.remarks||"",fname,new Date().toLocaleString("en-IN")];
+      await fetch(gsUrl,{method:"POST",body:JSON.stringify({action:"append",row}),headers:{"Content-Type":"application/json"}});
+      toast2("✓ Saved to Google Sheets!","ok");
+    }catch(e){toast2("Firestore saved. Sheets sync failed: "+e.message,"err");}
+    finally{setGsSyncing(false);}
+  }
+
+  // ── Excel Import state ──
+  const[impOpen,setImpOpen]=useState(false);
+  const[impRows,setImpRows]=useState([]); // raw rows from Excel
+  const[impCols,setImpCols]=useState([]); // column headers
+  const[colMap,setColMap]=useState({}); // our field → Excel col
+  const[impSel,setImpSel]=useState({}); // rowIndex → selected
+  const[importing,setImporting]=useState(false);
+  const impFileRef=React.useRef();
+
+  const DISP_FIELDS=[
+    {k:"date",l:"Date"},
+    {k:"challanNo",l:"Challan No."},
+    {k:"customer",l:"Customer"},
+    {k:"designNo",l:"Design No."},
+    {k:"meters",l:"Meters"},
+    {k:"taka",l:"No. of Taka"},
+    {k:"rate",l:"Rate/m"},
+    {k:"deliveryPlace",l:"Delivery Place"},
+    {k:"transporter",l:"Transporter"},
+    {k:"discountPct",l:"Discount %"},
+    {k:"remarks",l:"Remarks"},
+  ];
+
+  function onExcelFile(e){
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{
+        const wb=XLSX.read(ev.target.result,{type:"binary",cellDates:true});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
+        if(!data.length)return toast2("Empty sheet","err");
+        const headers=data[0].map(h=>String(h||"").trim());
+        const rows=data.slice(1).filter(r=>r.some(c=>c!=""));
+        setImpCols(headers);
+        setImpRows(rows);
+        // Auto-map columns by fuzzy name matching
+        const auto={};
+        const aliases={
+          date:["date","dispatch date","invoice date","challan date","dt"],
+          challanNo:["challan","challan no","challan number","invoice no","bill no","ch no"],
+          customer:["customer","buyer","party","sold to","client","to"],
+          designNo:["design","design no","design number","quality","article"],
+          meters:["meters","mtr","length","qty","quantity","mtrs"],
+          taka:["taka","rolls","pieces","pcs","bales","no of taka"],
+          rate:["rate","price","rate per meter","rate/m","per mtr"],
+          deliveryPlace:["delivery","delivery place","destination","place"],
+          transporter:["transporter","carrier","transport","lorry"],
+          discountPct:["discount","disc","disc%","discount %"],
+          remarks:["remarks","notes","note","comment"],
+        };
+        DISP_FIELDS.forEach(({k})=>{
+          const al=aliases[k]||[k];
+          const idx=headers.findIndex(h=>al.some(a=>h.toLowerCase().includes(a)));
+          if(idx>=0)auto[k]=String(idx);
+        });
+        setColMap(auto);
+        const sel={};rows.forEach((_,i)=>{sel[i]=true;});setImpSel(sel);
+        setImpOpen(true);
+      }catch(err){toast2("Could not read Excel: "+err.message,"err");}
+    };
+    reader.readAsBinaryString(file);
+    e.target.value="";
+  }
+
+  function cellVal(row,colIdx){
+    if(colIdx==null||colIdx==="")return "";
+    const v=row[+colIdx];
+    if(v instanceof Date)return v.toISOString().slice(0,10);
+    return String(v||"").trim();
+  }
+
+  async function doImport(){
+    setImporting(true);
+    const selected=impRows.filter((_,i)=>impSel[i]);
+    let count=0;
+    for(const row of selected){
+      const get=k=>cellVal(row,colMap[k]);
+      const meters=+get("meters")||0;const rate=+get("rate")||0;
+      const taxable=meters*rate;const disc=taxable*(+get("discountPct")||0)/100;
+      const afterDisc=taxable-disc;const sgst=afterDisc*0.025;const cgst=afterDisc*0.025;
+      const rec={
+        date:get("date")||today(),challanNo:get("challanNo"),customer:get("customer"),
+        designNo:get("designNo"),meters,taka:+get("taka")||0,rate,
+        deliveryPlace:get("deliveryPlace"),transporter:get("transporter"),
+        discountPct:+get("discountPct")||0,remarks:get("remarks"),
+        taxable,discAmt:disc,afterDisc,sgst,cgst,total:afterDisc+sgst+cgst,
+        _imported:true,
+      };
+      if(!rec.customer&&!rec.meters)continue;
+      await dbs(firm,"dispatch",uid(),rec);
+      count++;
+    }
+    setImporting(false);setImpOpen(false);setImpRows([]);setImpCols([]);setColMap({});
+    toast2(count+" dispatches imported!");
+  }
+
   // Live tax calculation
   const taxable=(+f.meters||0)*(+f.rate||0);
   const discAmt=taxable*(+f.discountPct||0)/100;
   const afterDisc=taxable-discAmt;
-  const sgst=afterDisc*0.025;
-  const cgst=afterDisc*0.025;
-  const total=afterDisc+sgst+cgst;
+  const sgst=afterDisc*0.025;const cgst=afterDisc*0.025;const total=afterDisc+sgst+cgst;
 
-  // Available designs from fabric received (not yet fully dispatched)
-  const dispByDesign={};
-  disp.forEach(r=>{dispByDesign[r.designNo]=(dispByDesign[r.designNo]||0)+(+r.meters||0);});
   const availDesigns=[...new Set(fab.map(r=>r.designNo).filter(Boolean))];
-
-  async function sub(){
-    if(!f.customer||!f.designNo||!f.meters||!f.rate){toast2("Fill required fields","err");return}
-    const save={...f,meters:+f.meters,taka:+f.taka||0,rate:+f.rate,discountPct:+f.discountPct||0,
-      taxable,discAmt,afterDisc,sgst,cgst,total};
-    if(editId){await dbUpdate(firm,"dispatch",editId,save);setEditId(null);}
-    else{await dbs(firm,"dispatch",uid(),save);}
-    sf(ini);toast2(editId?"Updated!":"Dispatch saved!");
-  }
-  async function del(id){if(!confirm("Delete dispatch entry?"))return;await dbd(firm,"dispatch",id)}
-
   const filt=[...disp].reverse().filter(r=>{
     const q=srch.toLowerCase();
     return(!fc||r.customer===fc)&&(!q||[r.challanNo,r.customer,r.designNo,r.transporter,r.deliveryPlace].some(x=>x&&x.toLowerCase().includes(q)));
@@ -2329,15 +2430,138 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
   const customers=[...new Set(disp.map(r=>r.customer).filter(Boolean))];
 
   return h("div",null,
+
+    // ── GOOGLE SHEETS SYNC PANEL ──
+    h("div",{className:"card",style:{marginBottom:12,border:gsUrl?"1px solid #B8E5CB":"1px solid var(--bd)",background:gsUrl?"#F0FBF5":"var(--wh)"}},
+      h("div",{className:"chd"},
+        h("div",{style:{display:"flex",alignItems:"center",gap:8}},
+          h("span",{style:{fontSize:16}},"📊"),
+          h("div",null,
+            h("div",{className:"ct",style:{marginBottom:0}},"Google Sheets Sync"),
+            h("div",{style:{fontSize:11,color:gsUrl?"var(--ok)":"var(--mu)",marginTop:2}},
+              gsUrl?"✅ Connected — dispatches auto-sync to your sheet":"Not connected — set up to auto-sync dispatches"
+            )
+          )
+        ),
+        h("button",{className:"btn btn-sm "+(gsUrl?"btn-xl":"btn-p"),onClick:()=>{setGsUrlInput(gsUrl);setGsOpen(v=>!v)}},gsOpen?"✕ Close":(gsUrl?"⚙ Settings":"+ Connect"))
+      ),
+      gsOpen&&h("div",{style:{marginTop:10}},
+        h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:12,fontSize:12,color:"var(--in)",lineHeight:1.8}},
+          h("strong",null,"Setup steps:"),h("br",null),
+          "1. Open Google Sheets and go to ",h("strong",null,"Extensions → Apps Script"),h("br",null),
+          "2. Replace all code with the script below and click ",h("strong",null,"Deploy → New deployment"),h("br",null),
+          "3. Set type = ",h("strong",null,"Web app"),", execute as = ",h("strong",null,"Me"),", access = ",h("strong",null,"Anyone"),h("br",null),
+          "4. Copy the Web App URL and paste it below"
+        ),
+        h("div",{style:{background:"#1e1e1e",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:12,fontFamily:"DM Mono,monospace",fontSize:11,color:"#d4d4d4",overflowX:"auto",whiteSpace:"pre"}},
+`function doPost(e) {
+  var data = JSON.parse(e.postData.contents);
+  if (data.action !== 'append') return ok();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('Dispatch') || ss.insertSheet('Dispatch');
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(['Date','Challan No','Customer','Design No',
+      'Taka','Meters','Rate/m','Taxable','Disc%',
+      'After Disc','SGST','CGST','Total','Delivery Place',
+      'Transporter','Remarks','Firm','Synced At']);
+  }
+  sh.appendRow(data.row);
+  return ContentService.createTextOutput(
+    JSON.stringify({status:'ok'})
+  ).setMimeType(ContentService.MimeType.JSON);
+}
+function ok() {
+  return ContentService.createTextOutput(
+    JSON.stringify({status:'ok'})
+  ).setMimeType(ContentService.MimeType.JSON);
+}`
+        ),
+        h("div",{className:"fld",style:{marginBottom:8}},
+          h("label",null,"Apps Script Web App URL"),
+          h("input",{value:gsUrlInput,onChange:e=>setGsUrlInput(e.target.value),placeholder:"https://script.google.com/macros/s/.../exec",style:{fontFamily:"DM Mono,monospace",fontSize:12}})
+        ),
+        h("div",{style:{display:"flex",gap:8}},
+          h("button",{className:"btn btn-p",onClick:saveGsUrl},"Save URL"),
+          gsUrl&&h("button",{className:"btn btn-del",onClick:()=>{setGsUrlInput("");setGsUrl("");localStorage.removeItem(GS_KEY);setGsOpen(false);toast2("Disconnected","ok")}},"Disconnect"),
+          h("button",{className:"btn",onClick:()=>setGsOpen(false)},"Cancel")
+        )
+      )
+    ),
+
+    // ── EXCEL IMPORT PANEL ──
+    h("div",{className:"card",style:{marginBottom:12}},
+      h("div",{className:"chd"},
+        h("div",{className:"ct"},"📥 Import from Excel"),
+        h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
+          h("a",{href:"https://1drv.ms/x/c/d88fff87125c45ba/IQBHbh44Es-5TaSA3xJ9dBXWAZzsreKVvcAwF5NgCR-hNWg",target:"_blank",className:"btn btn-sm"},"📎 Open OneDrive sheet"),
+          h("input",{type:"file",accept:".xlsx,.xls,.csv",ref:impFileRef,style:{display:"none"},onChange:onExcelFile}),
+          h("button",{className:"btn btn-sm btn-p",onClick:()=>impFileRef.current.click()},"⬆ Upload Excel / CSV")
+        )
+      ),
+      !impOpen&&h("div",{style:{fontSize:11,color:"var(--mu)",lineHeight:1.7}},
+        "1. Click 📎 to open your OneDrive sheet → File → Save a copy or Download as Excel",h("br",null),
+        "2. Click ⬆ Upload Excel / CSV to import it here",h("br",null),
+        "3. Map columns, select rows, and click Import — all selected rows become dispatch records"
+      ),
+
+      // ── Column mapping + preview ──
+      impOpen&&h("div",null,
+        h("div",{style:{fontSize:12,fontWeight:600,marginBottom:8,color:"var(--in)"}},"Map columns from your Excel to dispatch fields:"),
+        h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}},
+          DISP_FIELDS.map(({k,l})=>h("div",{key:k,style:{display:"flex",alignItems:"center",gap:4,fontSize:11}},
+            h("label",{style:{minWidth:90,color:"var(--mu)"}},l),
+            h("select",{value:colMap[k]||"",onChange:e=>setColMap(m=>({...m,[k]:e.target.value})),style:{height:26,fontSize:11}},
+              h("option",{value:""},"— skip —"),
+              impCols.map((c,i)=>h("option",{key:i,value:String(i)},c||"Col "+(i+1)))
+            )
+          ))
+        ),
+        h("div",{style:{fontSize:11,color:"var(--mu)",marginBottom:6}},
+          "Preview ("+impRows.length+" rows) — check rows to import:"
+        ),
+        h("div",{style:{maxHeight:260,overflowY:"auto",border:"1px solid var(--bdl)",borderRadius:"var(--r)"}},
+          h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11}},
+            h("thead",{style:{position:"sticky",top:0,background:"var(--bg)"}},
+              h("tr",null,
+                h("th",{style:{padding:"4px 6px",width:28}},
+                  h("input",{type:"checkbox",checked:Object.values(impSel).every(Boolean),
+                    onChange:e=>{const s={};impRows.forEach((_,i)=>{s[i]=e.target.checked;});setImpSel(s);}})
+                ),
+                DISP_FIELDS.filter(({k})=>colMap[k]!=null&&colMap[k]!=="").map(({k,l})=>
+                  h("th",{key:k,style:{padding:"4px 6px",textAlign:"left",fontWeight:600}},l)
+                )
+              )
+            ),
+            h("tbody",null,impRows.map((row,i)=>
+              h("tr",{key:i,style:{borderTop:"1px solid var(--bdl)",background:impSel[i]?"":"#F9F9F9"}},
+                h("td",{style:{padding:"4px 6px"}},
+                  h("input",{type:"checkbox",checked:!!impSel[i],onChange:e=>setImpSel(m=>({...m,[i]:e.target.checked}))})
+                ),
+                DISP_FIELDS.filter(({k})=>colMap[k]!=null&&colMap[k]!=="").map(({k})=>
+                  h("td",{key:k,style:{padding:"4px 6px",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+                    cellVal(row,colMap[k])
+                  )
+                )
+              )
+            ))
+          )
+        ),
+        h("div",{style:{display:"flex",gap:8,marginTop:8,alignItems:"center"}},
+          h("span",{style:{fontSize:11,color:"var(--mu)"}},Object.values(impSel).filter(Boolean).length+" of "+impRows.length+" rows selected"),
+          h("button",{className:"btn btn-p",onClick:doImport,disabled:importing},importing?"Importing...":"⬆ Import selected"),
+          h("button",{className:"btn",onClick:()=>{setImpOpen(false);setImpRows([]);}},"Cancel")
+        )
+      )
+    ),
+
     h("div",{className:"card"},
-      editId&&h("div",{className:"edit-bar"},"✏️ Editing dispatch — ",h("button",{className:"btn btn-sm",style:{marginLeft:"auto"},onClick:cancelEdit},"Cancel")),
-      h("div",{className:"chd"},h("div",{className:"ct"},editId?"Update dispatch":"New fabric dispatch / sale"),
+      editId&&h("div",{className:"edit-bar"},"✏️ Editing — ",h("button",{className:"btn btn-sm",style:{marginLeft:"auto"},onClick:cancelEdit},"Cancel")),
+      h("div",{className:"chd"},h("div",{className:"ct"},editId?"Update dispatch":"New fabric dispatch"),
         h("div",{style:{display:"flex",gap:6}},
           h("span",{className:"bdg ba"},fmt(totalM)+" m total"),
           totalAmt>0&&h("span",{className:"bdg bo"},"₹"+fmt(totalAmt))
         )
       ),
-      // Basic info
       h("div",{className:"fr c2"},
         FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),
         FL("Challan No.",h("input",{value:f.challanNo,onChange:e=>s("challanNo",e.target.value),placeholder:"e.g. CH-001"}))
@@ -2356,25 +2580,15 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         FL("Rate / meter (₹) *",h("input",{type:"number",value:f.rate,onChange:e=>s("rate",e.target.value)}))
       ),
       FL("Discount %",h("input",{type:"number",value:f.discountPct,onChange:e=>s("discountPct",e.target.value),placeholder:"0",style:{marginBottom:8}})),
-      // Live tax calculation panel
-      (taxable>0)&&h("div",{style:{background:"var(--bg)",border:"1px solid var(--bdl)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:10}},
+      taxable>0&&h("div",{style:{background:"var(--bg)",border:"1px solid var(--bdl)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:10}},
         h("div",{style:{fontSize:11,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}},"Invoice calculation"),
         h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},
           h("tbody",null,
-            [
-              ["Taxable amount",taxable],
-              f.discountPct&&["Discount ("+f.discountPct+"%)",-discAmt],
-              f.discountPct&&["After discount",afterDisc],
-              ["SGST @ 2.5%",sgst],
-              ["CGST @ 2.5%",cgst],
-            ].filter(Boolean).map(([label,val],i)=>
-              h("tr",{key:i,style:{borderBottom:"1px solid var(--bdl)"}},
-                h("td",{style:{padding:"4px 0",color:"var(--mu)"}},label),
-                h("td",{style:{padding:"4px 0",textAlign:"right",fontFamily:"DM Mono,monospace",color:val<0?"var(--er)":"var(--tx)"}},
-                  (val<0?"−₹":"₹")+fmt(Math.abs(val))
-                )
-              )
-            ),
+            [["Taxable amount",taxable],f.discountPct&&["Discount ("+f.discountPct+"%)",-discAmt],f.discountPct&&["After discount",afterDisc],["SGST @ 2.5%",sgst],["CGST @ 2.5%",cgst]].filter(Boolean)
+            .map(([label,val],i)=>h("tr",{key:i,style:{borderBottom:"1px solid var(--bdl)"}},
+              h("td",{style:{padding:"4px 0",color:"var(--mu)"}},label),
+              h("td",{style:{padding:"4px 0",textAlign:"right",fontFamily:"DM Mono,monospace",color:val<0?"var(--er)":"var(--tx)"}},(val<0?"−₹":"₹")+fmt(Math.abs(val)))
+            )),
             h("tr",{style:{borderTop:"2px solid var(--bdl)"}},
               h("td",{style:{padding:"6px 0",fontWeight:700,fontSize:13}},"Total Amount"),
               h("td",{style:{padding:"6px 0",textAlign:"right",fontWeight:700,fontSize:15,color:"var(--ok)",fontFamily:"DM Mono,monospace"}},"₹"+fmt(total))
@@ -2383,7 +2597,12 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         )
       ),
       FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value),style:{marginBottom:8}})),
-      h("button",{className:"btn btn-p btn-full",onClick:sub},editId?"Update Dispatch":"Save Dispatch")
+      h("button",{className:"btn btn-p btn-full",disabled:gsSyncing,onClick:async()=>{
+        if(!f.customer||!f.designNo||!f.meters||!f.rate){toast2("Fill required fields","err");return}
+        const save={...f,meters:+f.meters,taka:+f.taka||0,rate:+f.rate,discountPct:+f.discountPct||0,taxable,discAmt,afterDisc,sgst,cgst,total};
+        if(editId){await dbUpdate(firm,"dispatch",editId,save);setEditId(null);toast2("Updated!");}
+        else{await dbs(firm,"dispatch",uid(),save);await syncToSheets(save);sf(ini);}
+      }},gsSyncing?"Syncing to Sheets...":editId?"Update Dispatch":"Save & Sync Dispatch")
     ),
     h("div",{className:"card"},
       h("div",{className:"chd"},h("div",{className:"ct"},"Dispatch Register ("+disp.length+")"),h("div",{className:"bgrp"},
@@ -2396,7 +2615,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
       ),
       filt.length===0?Em("No dispatches yet."):
       h("div",{className:"tw"},h("table",null,
-        h("thead",null,h("tr",null,TH(["Date","Challan","Customer","Design","Taka","Meters","Rate","Discount","SGST","CGST","Total ₹","Delivery",""]))),
+        h("thead",null,h("tr",null,TH(["Date","Challan","Customer","Design","Taka","Meters","Rate","Disc%","SGST","CGST","Total ₹","Delivery",""]))),
         h("tbody",null,filt.map((r,i)=>h("tr",{key:i},
           Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(r.date))),
           Td(r.challanNo||"—","mn"),
@@ -2418,6 +2637,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
       ))
     )
   );
+  async function del(id){if(!confirm("Delete dispatch entry?"))return;await dbd(firm,"dispatch",id)}
 }
 
 // ── HISTORY PAGE ──
