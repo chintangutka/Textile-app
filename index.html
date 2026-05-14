@@ -213,7 +213,7 @@ const DEF={
   godowns:["Mill A","Mill B","Own Godown","Supplier X","Supplier Y"],
   weavers:["Ramesh Weaver","Suresh Loom","Karim Handloom","Ganesh Fabrics"],
   sizers:["Patel Sizing","Kumar Doubler","Singh Warp Prep"],
-  yarnRates:{},yarnMinStock:{},yarnDenierOverride:{},yarnSuppliers:[],yarnMills:[],yarnGrades:[],pendingDays:15
+  yarnRates:{},yarnMinStock:{},yarnDenierOverride:{},yarnSuppliers:[],yarnMills:[],yarnGrades:[],customers:[],pendingDays:15
 };
 
 // Root
@@ -238,21 +238,35 @@ function App(){
   const[bms,setBms]=useState([]);const[delBms,setDelBms]=useState([]);
   const[trf,setTrf]=useState([]);const[delTrf,setDelTrf]=useState([]);
   const[fab,setFab]=useState([]);const[delFab,setDelFab]=useState([]);
+  const[disp,setDisp]=useState([]);const[delDisp,setDelDisp]=useState([]);
 
   const toast2=(msg,type="ok")=>{setT({msg,type});setTimeout(()=>setT(null),3000)};
   const go=(p)=>{setPage(p);setDr(false)};
   const swf=(f)=>{setFirm(f);localStorage.setItem("tsm_f",f)};
 
   useEffect(()=>{
-    const u=[];setM(DEF);setInw([]);setIss([]);setBms([]);setTrf([]);setFab([]);setConn("pend");
+    const u=[];setM(DEF);setInw([]);setIss([]);setBms([]);setTrf([]);setFab([]);setDisp([]);setConn("pend");
     try{
       u.push(mListen(firm,d=>{setM({...DEF,...d});setConn("ok")}));
       db.collection("firms").doc(firm).collection("masters").doc("config").get().then(s=>{if(!s.exists)mSave(firm,DEF)});
       const L=(c,s,sd)=>dbl(firm,c,(active,deleted)=>{s(active);if(sd)sd(deleted);setConn("ok")});
-      u.push(L("inward",setInw,setDelInw));u.push(L("issues",setIss,setDelIss));u.push(L("beams",setBms,setDelBms));u.push(L("transfers",setTrf,setDelTrf));u.push(L("fabric",setFab,setDelFab));
+      u.push(L("inward",setInw,setDelInw));u.push(L("issues",setIss,setDelIss));u.push(L("beams",setBms,setDelBms));u.push(L("transfers",setTrf,setDelTrf));u.push(L("fabric",setFab,setDelFab));u.push(L("dispatch",setDisp,setDelDisp));
     }catch(e){setConn("err")}
     return()=>u.forEach(x=>x&&x());
   },[firm]);
+
+  // ── Auto-status: when fabric received >= beam meters → mark "Fabric received" ──
+  useEffect(()=>{
+    if(!bms.length||!fab.length)return;
+    bms.forEach(async beam=>{
+      if(["Fabric received","Closed"].includes(beam.status))return;
+      if(!beam.designNo||!beam.totalMeters)return;
+      const rcvdM=fab.filter(f=>f.designNo&&beam.designNo&&f.designNo.trim().toLowerCase()===beam.designNo.trim().toLowerCase()).reduce((a,f)=>a+(+f.meters||0),0);
+      if(rcvdM>=(+beam.totalMeters)){
+        await dbUpdate(firm,"beams",beam._id,{...beam,status:"Fabric received"});
+      }
+    });
+  },[fab]);
 
   const updM=async(k,v)=>{const u={...M,[k]:v};setM(u);await mSave(firm,u)};
   const parties=[...M.weavers.map(w=>({name:w,type:"weaver"})),...M.sizers.map(s=>({name:s,type:"sizer"}))];
@@ -383,6 +397,7 @@ function App(){
     {id:"bms",l:"Beam Register",ic:"▦",g:"Transactions"},
     {id:"trf",l:"Yarn Transfer",ic:"⇄",g:"Transactions"},
     {id:"fab",l:"Fabric Received",ic:"≋",g:"Transactions"},
+    {id:"disp",l:"Fabric Dispatch",ic:"📦",g:"Transactions"},
     {id:"led",l:"Stock Ledger",ic:"≡",g:"Reports"},
     {id:"par",l:"Party Ledger",ic:"◈",g:"Reports"},
     {id:"ynled",l:"Yarn Mill",ic:"🏭",g:"Reports"},
@@ -390,9 +405,9 @@ function App(){
     {id:"hist",l:"History",ic:"🗑",g:"Reports"},
     {id:"mas",l:"Masters",ic:"⚙",g:"Settings"}
   ];
-  const ttls={dash:"Dashboard",alerts:"Alerts",inw:"Yarn Inward",iss:"Issue Yarn",bms:"Beam Register",trf:"Yarn Transfer",fab:"Fabric Received",led:"Stock Ledger",par:"Party Ledger",ynled:"Yarn Mill Ledger",rep:"Performance",hist:"History (15 days)",mas:"Masters"};
-  const ctx={firm,M,parties,inw,iss,bms,trf,fab,yBal,yBalT,pBal,bmConsumed,alerts,stockVal,toast2,updM,fname:FIRMS[firm].name,delInw,delIss,delBms,delTrf,delFab};
-  const PGS={dash:PDash,alerts:PAlerts,inw:PInw,iss:PIss,bms:PBms,trf:PTrf,fab:PFab,led:PLed,par:PPar,ynled:PYarnLed,rep:PRep,hist:PHist,mas:PMas};
+  const ttls={dash:"Dashboard",alerts:"Alerts",inw:"Yarn Inward",iss:"Issue Yarn",bms:"Beam Register",trf:"Yarn Transfer",fab:"Fabric Received",disp:"Fabric Dispatch",led:"Stock Ledger",par:"Party Ledger",ynled:"Yarn Mill Ledger",rep:"Performance",hist:"History (15 days)",mas:"Masters"};
+  const ctx={firm,M,parties,inw,iss,bms,trf,fab,disp,yBal,yBalT,pBal,bmConsumed,alerts,stockVal,toast2,updM,fname:FIRMS[firm].name,delInw,delIss,delBms,delTrf,delFab,delDisp};
+  const PGS={dash:PDash,alerts:PAlerts,inw:PInw,iss:PIss,bms:PBms,trf:PTrf,fab:PFab,disp:PDisp,led:PLed,par:PPar,ynled:PYarnLed,rep:PRep,hist:PHist,mas:PMas};
   const P=PGS[page]||PDash;
 
   const bn=[{id:"dash",ic:"⊞",l:"Home"},{id:"alerts",ic:"🔔",l:"Alerts",badge:alerts.length},{id:"inw",ic:"↓",l:"Inward"},{id:"fab",ic:"≋",l:"Fabric"}];
@@ -1461,7 +1476,7 @@ function PFab({firm,M,fab,bms,toast2,fname}){
 }
 
 // ── STOCK LEDGER ──
-function PLed({yBal,yBalT,pBal,bmConsumed,inw,iss,trf,fab,M,parties,firm,toast2,fname}){
+function PLed({yBal,yBalT,pBal,bmConsumed,inw,iss,trf,fab,disp,M,parties,firm,toast2,fname}){
   const[view,setView]=useState("location");
   const[fy,setFy]=useState(""),[fg,setFg]=useState(""),[floc,setFloc]=useState("");
   // ── Fabric stock add/edit form ──
@@ -1542,7 +1557,7 @@ function PLed({yBal,yBalT,pBal,bmConsumed,inw,iss,trf,fab,M,parties,firm,toast2,
     ...locRows.filter(e=>e.q<0).map(e=>e.yt+" @ "+e.loc+": "+fmt(e.q)+" Kg")
   ];
 
-  const viewBtns=[{id:"location",l:"📍 Location"},{id:"groups",l:"🏷 Groups"},{id:"godown",l:"Godown"},{id:"party",l:"Party"},{id:"fabric",l:"🧵 Fabric"},{id:"summary",l:"Summary"}];
+  const viewBtns=[{id:"location",l:"📍 Location"},{id:"groups",l:"🏷 Grades"},{id:"lots",l:"🏷 Lots"},{id:"godown",l:"Godown"},{id:"party",l:"Party"},{id:"fabric",l:"🧵 Fabric"},{id:"summary",l:"Summary"}];
 
   const locTypeLabel=(row)=>{
     if(row.isOwn)return h("span",{className:"bdg ba",style:{fontSize:9}},"🏭 Own");
@@ -1585,7 +1600,83 @@ function PLed({yBal,yBalT,pBal,bmConsumed,inw,iss,trf,fab,M,parties,firm,toast2,
         view==="godown"?FL("Filter godown",h("select",{value:fg,onChange:e=>setFg(e.target.value)},h("option",{value:""},"All godowns"),M.godowns.map(g=>h("option",{key:g,value:g},g)))):h("div",null)
       ),
 
-      // ── 🏷 YARN GRADES VIEW ──      view==="groups"&&(()=>{        const grades=M.yarnGrades||[];        if(grades.length===0)return h("div",null,          Em("No grade assignments yet."),          h("div",{style:{textAlign:"center",marginTop:8,fontSize:12,color:"var(--mu)"}},"Go to Masters → 🏷 Yarn Grades to assign grades.")        );        // Group by yarn type        const byYarn={};        grades.forEach(g=>{if(!byYarn[g.yarnType])byYarn[g.yarnType]=[];byYarn[g.yarnType].push(g);});        Object.values(byYarn).forEach(arr=>arr.sort((a,b)=>(+a.grade||9)-(+b.grade||9)));        const yStock=(yt)=>{          const gd=Object.entries(yBal).filter(([k])=>k.startsWith(yt+"||")).reduce((a,[,v])=>a+v,0);          const pty=Object.values(pBal).reduce((a,py)=>a+(py[yt]||0),0);          return{gd,pty,total:gd+pty};        };        return h("div",null,          h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:10,fontSize:11,color:"var(--in)",lineHeight:1.6}},            "🏷 Shows grade assigned to each Yarn Type + Mill. E.g. 60s Cotton from Vishwateja Gold = Grade 1, from Hakumba Mill = Grade 3. Manage in Masters → 🏷 Yarn Grades."          ),          Object.entries(byYarn).sort(([a],[b])=>a.localeCompare(b)).map(([yt,mg])=>{            const s=yStock(yt); const min=+((M.yarnMinStock||{})[yt])||0; const isLow=min>0&&s.total<min;            return h("div",{key:yt,style:{marginBottom:12,border:"1px solid var(--bdl)",borderRadius:"var(--rl)",overflow:"hidden"}},              h("div",{style:{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:s.total<=0?"#FFF1F2":isLow?"#FFFBEB":"var(--okb)",borderBottom:"1px solid var(--bdl)"}},                h("div",{style:{flex:1}},                  h("div",{style:{fontWeight:700,fontSize:15}},yt),                  h("div",{style:{fontSize:11,color:"var(--mu)",marginTop:2}},mg.length+" mill"+(mg.length>1?"s":"")+" graded")                ),                h("div",{style:{textAlign:"right"}},                  h("div",{className:"mn fw5",style:{fontSize:16,color:s.total<=0?"var(--er)":isLow?"var(--wn)":"var(--ok)"}},fmt(s.total)+" Kg"),                  s.gd>0&&h("div",{style:{fontSize:11,color:"var(--mu)"}},"Godown: "+fmt(s.gd)+" Kg"),                  s.pty>0&&h("div",{style:{fontSize:11,color:"var(--mu)"}},"Parties: "+fmt(s.pty)+" Kg"),                  min>0&&isLow&&h("span",{className:"bdg be",style:{fontSize:9}},"Below min "+fmt(min)+" Kg")                )              ),              h("div",{className:"tw"},h("table",null,                h("thead",null,h("tr",null,TH(["Mill","Grade","Total Received (inward)","Avg Rate","Note"]))),                h("tbody",null,                  mg.map((g,gi)=>{                    const millInw=inw.filter(r=>r.yarnType===yt&&r.mill===g.mill);                    const rcvd=millInw.reduce((a,r)=>a+(+r.totalKg||0),0);                    const val=millInw.reduce((a,r)=>a+((+r.ratePerKg||0)*(+r.totalKg||0)),0);                    const avg=rcvd>0?val/rcvd:0;                    const otherGrades=mg.filter((_,j)=>j!==gi).map(o=>"G"+o.grade+" ("+o.mill+")").join(", ");                    return h("tr",{key:g.id||gi,style:{borderTop:"1px solid var(--bdl)"}},                      h("td",{style:{padding:"7px 10px",fontWeight:600}},g.mill),                      h("td",{style:{padding:"7px 10px"}},h("span",{className:"bdg",style:{background:GRADE_BG[+g.grade||1],color:GRADE_COLORS[+g.grade||1],border:"1px solid currentColor",fontSize:10}},GRADE_LABELS[+g.grade||1])),                      Td(rcvd>0?h("span",{className:"mn"},fmt(rcvd)+" Kg"):"No inward yet","mn"),                      Td(avg>0?"₹"+fmt(avg.toFixed(0))+"/Kg":"—","mn tm"),                      Td(otherGrades?h("span",{style:{fontSize:11,color:"var(--mu)"}},"Other grades: "+otherGrades):"Only grade assigned","mn tm")                    );                  }),                  // Show mills that have inward but no grade yet                  (()=>{                    const gradedMills=new Set(mg.map(g=>g.mill));                    const ungradedMills=[...new Set(inw.filter(r=>r.yarnType===yt&&r.mill&&!gradedMills.has(r.mill)).map(r=>r.mill))];                    return ungradedMills.map(mill=>h("tr",{key:mill,style:{borderTop:"1px solid var(--bdl)",background:"#FFFBEB"}},                      h("td",{style:{padding:"7px 10px",color:"var(--wn)"}},mill),                      Td(h("span",{className:"bdg bw",style:{fontSize:9}},"No grade yet"),"mn"),                      Td(fmt(inw.filter(r=>r.yarnType===yt&&r.mill===mill).reduce((a,r)=>a+(+r.totalKg||0),0))+" Kg received","mn"),                      h("td",{colSpan:2,style:{padding:"7px 10px",fontSize:11,color:"var(--wn)"}},"Go to Masters → 🏷 Yarn Grades to assign")                    ));                  })()                )              ))            );          })        );      })(),      // ── 📍 LOCATION VIEW (default) ──
+      // ── 🏷 YARN GRADES VIEW ──      view==="groups"&&(()=>{        const grades=M.yarnGrades||[];        if(grades.length===0)return h("div",null,          Em("No grade assignments yet."),          h("div",{style:{textAlign:"center",marginTop:8,fontSize:12,color:"var(--mu)"}},"Go to Masters → 🏷 Yarn Grades to assign grades.")        );        // Group by yarn type        const byYarn={};        grades.forEach(g=>{if(!byYarn[g.yarnType])byYarn[g.yarnType]=[];byYarn[g.yarnType].push(g);});        Object.values(byYarn).forEach(arr=>arr.sort((a,b)=>(+a.grade||9)-(+b.grade||9)));        const yStock=(yt)=>{          const gd=Object.entries(yBal).filter(([k])=>k.startsWith(yt+"||")).reduce((a,[,v])=>a+v,0);          const pty=Object.values(pBal).reduce((a,py)=>a+(py[yt]||0),0);          return{gd,pty,total:gd+pty};        };        return h("div",null,          h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:10,fontSize:11,color:"var(--in)",lineHeight:1.6}},            "🏷 Shows grade assigned to each Yarn Type + Mill. E.g. 60s Cotton from Vishwateja Gold = Grade 1, from Hakumba Mill = Grade 3. Manage in Masters → 🏷 Yarn Grades."          ),          Object.entries(byYarn).sort(([a],[b])=>a.localeCompare(b)).map(([yt,mg])=>{            const s=yStock(yt); const min=+((M.yarnMinStock||{})[yt])||0; const isLow=min>0&&s.total<min;            return h("div",{key:yt,style:{marginBottom:12,border:"1px solid var(--bdl)",borderRadius:"var(--rl)",overflow:"hidden"}},              h("div",{style:{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:s.total<=0?"#FFF1F2":isLow?"#FFFBEB":"var(--okb)",borderBottom:"1px solid var(--bdl)"}},                h("div",{style:{flex:1}},                  h("div",{style:{fontWeight:700,fontSize:15}},yt),                  h("div",{style:{fontSize:11,color:"var(--mu)",marginTop:2}},mg.length+" mill"+(mg.length>1?"s":"")+" graded")                ),                h("div",{style:{textAlign:"right"}},                  h("div",{className:"mn fw5",style:{fontSize:16,color:s.total<=0?"var(--er)":isLow?"var(--wn)":"var(--ok)"}},fmt(s.total)+" Kg"),                  s.gd>0&&h("div",{style:{fontSize:11,color:"var(--mu)"}},"Godown: "+fmt(s.gd)+" Kg"),                  s.pty>0&&h("div",{style:{fontSize:11,color:"var(--mu)"}},"Parties: "+fmt(s.pty)+" Kg"),                  min>0&&isLow&&h("span",{className:"bdg be",style:{fontSize:9}},"Below min "+fmt(min)+" Kg")                )              ),              h("div",{className:"tw"},h("table",null,                h("thead",null,h("tr",null,TH(["Mill","Grade","Total Received (inward)","Avg Rate","Note"]))),                h("tbody",null,                  mg.map((g,gi)=>{                    const millInw=inw.filter(r=>r.yarnType===yt&&r.mill===g.mill);                    const rcvd=millInw.reduce((a,r)=>a+(+r.totalKg||0),0);                    const val=millInw.reduce((a,r)=>a+((+r.ratePerKg||0)*(+r.totalKg||0)),0);                    const avg=rcvd>0?val/rcvd:0;                    const otherGrades=mg.filter((_,j)=>j!==gi).map(o=>"G"+o.grade+" ("+o.mill+")").join(", ");                    return h("tr",{key:g.id||gi,style:{borderTop:"1px solid var(--bdl)"}},                      h("td",{style:{padding:"7px 10px",fontWeight:600}},g.mill),                      h("td",{style:{padding:"7px 10px"}},h("span",{className:"bdg",style:{background:GRADE_BG[+g.grade||1],color:GRADE_COLORS[+g.grade||1],border:"1px solid currentColor",fontSize:10}},GRADE_LABELS[+g.grade||1])),                      Td(rcvd>0?h("span",{className:"mn"},fmt(rcvd)+" Kg"):"No inward yet","mn"),                      Td(avg>0?"₹"+fmt(avg.toFixed(0))+"/Kg":"—","mn tm"),                      Td(otherGrades?h("span",{style:{fontSize:11,color:"var(--mu)"}},"Other grades: "+otherGrades):"Only grade assigned","mn tm")                    );                  }),                  // Show mills that have inward but no grade yet                  (()=>{                    const gradedMills=new Set(mg.map(g=>g.mill));                    const ungradedMills=[...new Set(inw.filter(r=>r.yarnType===yt&&r.mill&&!gradedMills.has(r.mill)).map(r=>r.mill))];                    return ungradedMills.map(mill=>h("tr",{key:mill,style:{borderTop:"1px solid var(--bdl)",background:"#FFFBEB"}},                      h("td",{style:{padding:"7px 10px",color:"var(--wn)"}},mill),                      Td(h("span",{className:"bdg bw",style:{fontSize:9}},"No grade yet"),"mn"),                      Td(fmt(inw.filter(r=>r.yarnType===yt&&r.mill===mill).reduce((a,r)=>a+(+r.totalKg||0),0))+" Kg received","mn"),                      h("td",{colSpan:2,style:{padding:"7px 10px",fontSize:11,color:"var(--wn)"}},"Go to Masters → 🏷 Yarn Grades to assign")                    ));                  })()                )              ))            );          })        );      })(),      // ── 🏷 LOT TRACKING VIEW ──
+      view==="lots"&&(()=>{
+        // Group inward by lot number within each yarn type
+        const lotMap={};
+        inw.forEach(r=>{
+          if(!r.lotNo)return;
+          const key=r.yarnType+"|||"+r.lotNo;
+          if(!lotMap[key])lotMap[key]={yarnType:r.yarnType,lotNo:r.lotNo,mill:r.mill||"—",entries:[],totalKg:0,firstDate:"",lastDate:""};
+          lotMap[key].entries.push(r);
+          lotMap[key].totalKg+=(+r.totalKg||0);
+          if(!lotMap[key].firstDate||r.date<lotMap[key].firstDate)lotMap[key].firstDate=r.date;
+          if(r.date>lotMap[key].lastDate)lotMap[key].lastDate=r.date;
+        });
+        // Group by yarn type
+        const byYarnType={};
+        Object.values(lotMap).forEach(lot=>{
+          if(!byYarnType[lot.yarnType])byYarnType[lot.yarnType]={lots:[],totalReceived:0};
+          byYarnType[lot.yarnType].lots.push(lot);
+          byYarnType[lot.yarnType].totalReceived+=lot.totalKg;
+        });
+        // Current stock per yarn type (for proportional estimate)
+        const yarnStock=(yt)=>{
+          const gd=Object.entries(yBal).filter(([k])=>k.startsWith(yt+"||")).reduce((a,[,v])=>a+v,0);
+          const pty=Object.values(pBal).reduce((a,py)=>a+(py[yt]||0),0);
+          return gd+pty;
+        };
+        const lotYarns=Object.keys(byYarnType).filter(yt=>!fy||yt===fy).sort();
+        return h("div",null,
+          h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:10,fontSize:11,color:"var(--in)",lineHeight:1.6}},
+            "🏷 Lot tracking shows inward by challan/lot number. Remaining stock per lot is a proportional estimate (lot Kg ÷ total received × current stock). For exact lot tracking, assign lots when issuing yarn."
+          ),
+          lotYarns.length===0?Em("No lot/challan numbers found in inward records. Add Lot/Challan No when recording inward."):
+          lotYarns.map(yt=>{
+            const data=byYarnType[yt];
+            const currStock=yarnStock(yt);
+            const lots=data.lots.sort((a,b)=>b.lastDate.localeCompare(a.lastDate));
+            return h("div",{key:yt,style:{marginBottom:14,border:"1px solid var(--bdl)",borderRadius:"var(--rl)",overflow:"hidden"}},
+              h("div",{style:{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"var(--bg)",borderBottom:"1px solid var(--bdl)"}},
+                h("div",{style:{flex:1}},
+                  h("div",{style:{fontWeight:700,fontSize:14}},yt),
+                  h("div",{style:{fontSize:11,color:"var(--mu)",marginTop:1}},lots.length+" lots | "+fmt(data.totalReceived)+" Kg total received")
+                ),
+                h("div",{style:{textAlign:"right"}},
+                  h("div",{className:"mn fw5",style:{fontSize:15,color:currStock<=0?"var(--er)":currStock<100?"var(--wn)":"var(--ok)"}},fmt(currStock)+" Kg in stock"),
+                  h("div",{style:{fontSize:11,color:"var(--mu)"}},"across all lots")
+                )
+              ),
+              h("div",{className:"tw"},h("table",null,
+                h("thead",null,h("tr",null,TH(["Lot / Challan","Mill","First received","Last received","Total received","Est. remaining"]))),
+                h("tbody",null,
+                  lots.map((lot,i)=>{
+                    // Proportional remaining estimate
+                    const estRemaining=data.totalReceived>0?(lot.totalKg/data.totalReceived)*currStock:0;
+                    const pct=data.totalReceived>0?Math.round((lot.totalKg/data.totalReceived)*100):0;
+                    return h("tr",{key:i,style:{borderTop:"1px solid var(--bdl)"}},
+                      h("td",{style:{padding:"7px 10px",fontWeight:600}},lot.lotNo),
+                      Td(lot.mill,"mn"),
+                      Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(lot.firstDate))),
+                      Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(lot.lastDate))),
+                      h("td",{style:{padding:"7px 10px"}},h("div",null,
+                        h("span",{className:"mn fw5"},fmt(lot.totalKg)+" Kg"),
+                        h("span",{className:"tm",style:{fontSize:10,marginLeft:4}},"("+pct+"% of total)")
+                      )),
+                      h("td",{style:{padding:"7px 10px"}},
+                        h("span",{className:"mn",style:{color:estRemaining<10?"var(--er)":estRemaining<100?"var(--wn)":"var(--ok)"}},fmt(estRemaining)+" Kg ≈"),
+                        h("span",{className:"tm",style:{fontSize:10,marginLeft:4}},"proportional est.")
+                      )
+                    );
+                  })
+                )
+              ))
+            );
+          })
+        );
+      })(),
+
+      // ── 📍 LOCATION VIEW (default) ──
       view==="location"&&h("div",null,
         h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:10,fontSize:11,color:"var(--in)",lineHeight:1.7}},
           "📍 Shows where every kg of yarn physically is. 🏭 Own = your godown that is also a Weaver/Sizer (combined balance — godown un-issued + party issued). 🏭 Godown = pure storage. 👤 Party = external weaver/sizer."
@@ -1759,10 +1850,17 @@ function PLed({yBal,yBalT,pBal,bmConsumed,inw,iss,trf,fab,M,parties,firm,toast2,
           filtFab.forEach(f=>{const loc=f.location||"(No godown set)";if(!locGroups[loc])locGroups[loc]=[];locGroups[loc].push(f);});
           const totalM=filtFab.reduce((a,f)=>a+(+f.meters||0),0);
           const totalWt=filtFab.reduce((a,f)=>a+(+f.weight||0),0);
+          // Dispatch summary per design
+          const dispByDesign={};
+          (disp||[]).forEach(r=>{dispByDesign[r.designNo]=(dispByDesign[r.designNo]||0)+(+r.meters||0);});
+          const totalDisp=filtFab.reduce((a,f)=>a+(dispByDesign[f.designNo]||0),0);
+          const totalAvail=Math.max(0,totalM-totalDisp);
           return h("div",null,
             filtFab.length>0&&h("div",{style:{display:"flex",gap:8,marginBottom:10,flexWrap:"wrap"}},
-              h("span",{className:"bdg bo mn"},fmt(totalM)+" m total"),
-              totalWt>0&&h("span",{className:"bdg bw mn"},fmt(totalWt)+" Kg total"),
+              h("span",{className:"bdg bo mn"},fmt(totalM)+" m received"),
+              totalDisp>0&&h("span",{className:"bdg be mn"},fmt(totalDisp)+" m dispatched"),
+              h("span",{className:"bdg ba mn fw5"},fmt(totalAvail)+" m available"),
+              totalWt>0&&h("span",{className:"bdg bw mn"},fmt(totalWt)+" Kg total wt"),
               h("span",{className:"tm",style:{fontSize:11,alignSelf:"center"}},filtFab.length+" entries")
             ),
             filtFab.length===0?Em("No fabric entries for this location. Use '+ Add fabric' above."):
@@ -2063,13 +2161,14 @@ function PMas({M,updM,toast2}){
       ))
     );
   }
-  const tabs=[{id:"yarn",l:"Yarn types"},{id:"grades",l:"🏷 Yarn Grades"},{id:"mills",l:"🏭 Mills"},{id:"suppliers",l:"Suppliers"},{id:"godowns",l:"Godowns"},{id:"weavers",l:"Weavers"},{id:"sizers",l:"Sizers"}];
+  const tabs=[{id:"yarn",l:"Yarn types"},{id:"grades",l:"🏷 Yarn Grades"},{id:"mills",l:"🏭 Mills"},{id:"suppliers",l:"Suppliers"},{id:"customers",l:"👥 Customers"},{id:"godowns",l:"Godowns"},{id:"weavers",l:"Weavers"},{id:"sizers",l:"Sizers"}];
   return h("div",null,
     h("div",{style:{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}},tabs.map(t=>h("button",{key:t.id,className:"btn"+(tab===t.id?" btn-p":""),style:{height:32,fontSize:12},onClick:()=>setTab(t.id)},t.l))),
     tab==="yarn"&&h(YarnM,null),
     tab==="grades"&&h(YarnGradesM,null),
     tab==="mills"&&h(ML,{title:"Yarn Mills (spinning mills)",mk:"yarnMills",ic:"🏭"}),
     tab==="suppliers"&&h(YarnSuppliersM,null),
+    tab==="customers"&&h(ML,{title:"Customers / Buyers",mk:"customers",ic:"👥"}),
     tab==="godowns"&&h(ML,{title:"Godowns / Mills",mk:"godowns",ic:"🏭"}),
     tab==="weavers"&&h(ML,{title:"Weavers",mk:"weavers",ic:"👤"}),
     tab==="sizers"&&h(ML,{title:"Sizers / Doublers",mk:"sizers",ic:"⚙"}),
@@ -2186,6 +2285,138 @@ function PYarnLed({inw,M,fname}){
       );
     }),
     Object.keys(millMap).length===0&&Em("No inward entries match your filters.")
+  );
+}
+
+// ── FABRIC DISPATCH / SALE ──
+function PDisp({firm,M,disp,fab,toast2,updM,fname}){
+  const[editId,setEditId]=useState(null);
+  const ini={date:today(),challanNo:"",customer:"",designNo:"",meters:"",taka:"",rate:"",deliveryPlace:"",transporter:"",discountPct:"",remarks:""};
+  const startEdit=(r)=>{setEditId(r._id);sf({date:r.date||today(),challanNo:r.challanNo||"",customer:r.customer||"",designNo:r.designNo||"",meters:r.meters||"",taka:r.taka||"",rate:r.rate||"",deliveryPlace:r.deliveryPlace||"",transporter:r.transporter||"",discountPct:r.discountPct||"",remarks:r.remarks||""})};
+  const cancelEdit=()=>{setEditId(null);sf(ini)};
+  const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
+  const[srch,setSrch]=useState(""),[fc,setFc]=useState("");
+
+  // Live tax calculation
+  const taxable=(+f.meters||0)*(+f.rate||0);
+  const discAmt=taxable*(+f.discountPct||0)/100;
+  const afterDisc=taxable-discAmt;
+  const sgst=afterDisc*0.025;
+  const cgst=afterDisc*0.025;
+  const total=afterDisc+sgst+cgst;
+
+  // Available designs from fabric received (not yet fully dispatched)
+  const dispByDesign={};
+  disp.forEach(r=>{dispByDesign[r.designNo]=(dispByDesign[r.designNo]||0)+(+r.meters||0);});
+  const availDesigns=[...new Set(fab.map(r=>r.designNo).filter(Boolean))];
+
+  async function sub(){
+    if(!f.customer||!f.designNo||!f.meters||!f.rate){toast2("Fill required fields","err");return}
+    const save={...f,meters:+f.meters,taka:+f.taka||0,rate:+f.rate,discountPct:+f.discountPct||0,
+      taxable,discAmt,afterDisc,sgst,cgst,total};
+    if(editId){await dbUpdate(firm,"dispatch",editId,save);setEditId(null);}
+    else{await dbs(firm,"dispatch",uid(),save);}
+    sf(ini);toast2(editId?"Updated!":"Dispatch saved!");
+  }
+  async function del(id){if(!confirm("Delete dispatch entry?"))return;await dbd(firm,"dispatch",id)}
+
+  const filt=[...disp].reverse().filter(r=>{
+    const q=srch.toLowerCase();
+    return(!fc||r.customer===fc)&&(!q||[r.challanNo,r.customer,r.designNo,r.transporter,r.deliveryPlace].some(x=>x&&x.toLowerCase().includes(q)));
+  });
+  const totalM=filt.reduce((a,r)=>a+(+r.meters||0),0);
+  const totalAmt=filt.reduce((a,r)=>a+(+r.total||0),0);
+  const customers=[...new Set(disp.map(r=>r.customer).filter(Boolean))];
+
+  return h("div",null,
+    h("div",{className:"card"},
+      editId&&h("div",{className:"edit-bar"},"✏️ Editing dispatch — ",h("button",{className:"btn btn-sm",style:{marginLeft:"auto"},onClick:cancelEdit},"Cancel")),
+      h("div",{className:"chd"},h("div",{className:"ct"},editId?"Update dispatch":"New fabric dispatch / sale"),
+        h("div",{style:{display:"flex",gap:6}},
+          h("span",{className:"bdg ba"},fmt(totalM)+" m total"),
+          totalAmt>0&&h("span",{className:"bdg bo"},"₹"+fmt(totalAmt))
+        )
+      ),
+      // Basic info
+      h("div",{className:"fr c2"},
+        FL("Date",h("input",{type:"date",value:f.date,onChange:e=>s("date",e.target.value)})),
+        FL("Challan No.",h("input",{value:f.challanNo,onChange:e=>s("challanNo",e.target.value),placeholder:"e.g. CH-001"}))
+      ),
+      h("div",{className:"fr c2"},
+        FL("Sold to (Customer) *",h(AddSel,{val:f.customer,fn:v=>s("customer",v),opts:M.customers||[],placeholder:"Select customer...",onAdd:v=>updM("customers",[...(M.customers||[]),v])})),
+        FL("Design No. *",h(AddSel,{val:f.designNo,fn:v=>s("designNo",v),opts:availDesigns,placeholder:"Select design..."}))
+      ),
+      h("div",{className:"fr c2"},
+        FL("Delivery Place",h("input",{value:f.deliveryPlace,onChange:e=>s("deliveryPlace",e.target.value),placeholder:"City / address"})),
+        FL("Transporter",h("input",{value:f.transporter,onChange:e=>s("transporter",e.target.value),placeholder:"Transport company"}))
+      ),
+      h("div",{className:"fr c3"},
+        FL("Meters *",h("input",{type:"number",value:f.meters,onChange:e=>s("meters",e.target.value)})),
+        FL("No. of Taka",h("input",{type:"number",value:f.taka,onChange:e=>s("taka",e.target.value),placeholder:"Rolls / pieces"})),
+        FL("Rate / meter (₹) *",h("input",{type:"number",value:f.rate,onChange:e=>s("rate",e.target.value)}))
+      ),
+      FL("Discount %",h("input",{type:"number",value:f.discountPct,onChange:e=>s("discountPct",e.target.value),placeholder:"0",style:{marginBottom:8}})),
+      // Live tax calculation panel
+      (taxable>0)&&h("div",{style:{background:"var(--bg)",border:"1px solid var(--bdl)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:10}},
+        h("div",{style:{fontSize:11,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}},"Invoice calculation"),
+        h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},
+          h("tbody",null,
+            [
+              ["Taxable amount",taxable],
+              f.discountPct&&["Discount ("+f.discountPct+"%)",-discAmt],
+              f.discountPct&&["After discount",afterDisc],
+              ["SGST @ 2.5%",sgst],
+              ["CGST @ 2.5%",cgst],
+            ].filter(Boolean).map(([label,val],i)=>
+              h("tr",{key:i,style:{borderBottom:"1px solid var(--bdl)"}},
+                h("td",{style:{padding:"4px 0",color:"var(--mu)"}},label),
+                h("td",{style:{padding:"4px 0",textAlign:"right",fontFamily:"DM Mono,monospace",color:val<0?"var(--er)":"var(--tx)"}},
+                  (val<0?"−₹":"₹")+fmt(Math.abs(val))
+                )
+              )
+            ),
+            h("tr",{style:{borderTop:"2px solid var(--bdl)"}},
+              h("td",{style:{padding:"6px 0",fontWeight:700,fontSize:13}},"Total Amount"),
+              h("td",{style:{padding:"6px 0",textAlign:"right",fontWeight:700,fontSize:15,color:"var(--ok)",fontFamily:"DM Mono,monospace"}},"₹"+fmt(total))
+            )
+          )
+        )
+      ),
+      FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value),style:{marginBottom:8}})),
+      h("button",{className:"btn btn-p btn-full",onClick:sub},editId?"Update Dispatch":"Save Dispatch")
+    ),
+    h("div",{className:"card"},
+      h("div",{className:"chd"},h("div",{className:"ct"},"Dispatch Register ("+disp.length+")"),h("div",{className:"bgrp"},
+        h("button",{className:"btn btn-sm btn-pr no-print",onClick:()=>prnt(fname,"Fabric Dispatch",["Date","Challan","Customer","Design","Taka","Meters","Rate","Taxable","Disc%","After Disc","SGST","CGST","Total","Delivery","Transporter"],filt.map(r=>[fmtD(r.date),r.challanNo||"—",r.customer,r.designNo,r.taka||"—",fmt(r.meters),r.rate,"₹"+fmt(r.taxable),r.discountPct||0,"₹"+fmt(r.afterDisc),"₹"+fmt(r.sgst),"₹"+fmt(r.cgst),"₹"+fmt(r.total),r.deliveryPlace||"—",r.transporter||"—"]))},"🖨 Print"),
+        h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("dispatch",["Date","Challan","Customer","Design","Taka","Meters","Rate","Taxable","Disc%","After Disc","SGST","CGST","Total","Delivery","Transporter"],filt.map(r=>[fmtD(r.date),r.challanNo||"",r.customer,r.designNo,r.taka||"",r.meters,r.rate,r.taxable,r.discountPct||0,r.afterDisc,r.sgst,r.cgst,r.total,r.deliveryPlace||"",r.transporter||""]))},"⬇ Excel")
+      )),
+      h("div",{className:"sbr"},
+        h("input",{placeholder:"Search customer, design, challan...",value:srch,onChange:e=>setSrch(e.target.value)}),
+        h("select",{value:fc,onChange:e=>setFc(e.target.value),style:{height:34}},h("option",{value:""},"All customers"),customers.map(c=>h("option",{key:c,value:c},c)))
+      ),
+      filt.length===0?Em("No dispatches yet."):
+      h("div",{className:"tw"},h("table",null,
+        h("thead",null,h("tr",null,TH(["Date","Challan","Customer","Design","Taka","Meters","Rate","Discount","SGST","CGST","Total ₹","Delivery",""]))),
+        h("tbody",null,filt.map((r,i)=>h("tr",{key:i},
+          Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(r.date))),
+          Td(r.challanNo||"—","mn"),
+          h("td",null,h("span",{style:{fontWeight:600}},r.customer)),
+          Td(h("span",{className:"bdg bi"},r.designNo)),
+          Td(r.taka||"—","mn tm"),
+          Td(h("span",{className:"mn fw5"},fmt(r.meters)+" m")),
+          Td(r.rate?"₹"+fmt(r.rate):"—","mn"),
+          Td(r.discountPct?r.discountPct+"%":"—","mn tm"),
+          Td(r.sgst?"₹"+fmt(r.sgst):"—","mn tm"),
+          Td(r.cgst?"₹"+fmt(r.cgst):"—","mn tm"),
+          Td(h("span",{className:"mn fw5",style:{color:"var(--ok)"}},"₹"+fmt(r.total||0))),
+          Td(r.deliveryPlace||"—","mn tm"),
+          h("td",null,h("div",{style:{display:"flex",gap:4}},
+            h("button",{className:"btn btn-sm btn-edit no-print",onClick:()=>startEdit(r)},"Edit"),
+            h("button",{className:"btn btn-sm btn-del no-print",onClick:()=>del(r._id)},"Del")
+          ))
+        )))
+      ))
+    )
   );
 }
 
