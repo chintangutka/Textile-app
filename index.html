@@ -213,7 +213,7 @@ const DEF={
   godowns:["Mill A","Mill B","Own Godown","Supplier X","Supplier Y"],
   weavers:["Ramesh Weaver","Suresh Loom","Karim Handloom","Ganesh Fabrics"],
   sizers:["Patel Sizing","Kumar Doubler","Singh Warp Prep"],
-  yarnRates:{},yarnMinStock:{},yarnDenierOverride:{},yarnSuppliers:[],yarnMills:[],yarnGroups:[],pendingDays:15
+  yarnRates:{},yarnMinStock:{},yarnDenierOverride:{},yarnSuppliers:[],yarnMills:[],yarnGrades:[],pendingDays:15
 };
 
 // Root
@@ -314,16 +314,11 @@ function App(){
       if(min<=0)return;
       const bal=yBalT[yt]||0;
       if(bal>=min)return;
-      // Check group alternatives
-      const grp=findYarnGroup(M,yt);
-      const alts=grp?(grp.members||[]).filter(m=>m!==yt&&(yBalT[m]||0)>min):[];
-      if(alts.length>0){
-        // Same group has stock — suggest substitution
-        list.push({type:"stock",level:"wn",title:"Low stock: "+yt,sub:"Balance: "+fmt(bal)+" Kg (min: "+fmt(min)+" Kg) — ✓ Substitute available: "+alts.map(a=>a+" ("+fmt(yBalT[a]||0)+" Kg)").join(", ")+" ["+grp.name+" "+GRADE_LABELS[grp.grade||1]+"]"});
-      } else if(grp){
-        // Whole group is low
-        const grpTotal=grp.members.reduce((a,m)=>a+(yBalT[m]||0),0);
-        list.push({type:"stock",level:bal<=0?"cr":"wn",title:"Low stock: "+yt+" [Group: "+grp.name+"]",sub:"Balance: "+fmt(bal)+" Kg — entire "+GRADE_LABELS[grp.grade||1]+" group total: "+fmt(grpTotal)+" Kg"});
+      // Show grade info from mill assignments
+      const mg=millGradesForYarn(M,yt);
+      if(mg.length>0){
+        const gradeHint=mg.map(g=>"G"+g.grade+": "+g.mill).join(" | ");
+        list.push({type:"stock",level:bal<=0?"cr":"wn",title:"Low stock: "+yt,sub:"Balance: "+fmt(bal)+" Kg (min: "+fmt(min)+" Kg) — "+gradeHint});
       } else {
         list.push({type:"stock",level:bal<=0?"cr":"wn",title:"Low stock: "+yt,sub:"Balance: "+fmt(bal)+" Kg  Min: "+fmt(min)+" Kg"});
       }
@@ -498,15 +493,13 @@ function PAlerts({alerts,M,updM}){
 // ── YARN GROUP HELPERS ──
 const GRADE_LABELS={1:"Grade 1 — Premium",2:"Grade 2 — Standard",3:"Grade 3 — Economy"};
 const GRADE_COLORS={1:"var(--ok)",2:"var(--wn)",3:"var(--mu)"};
-function findYarnGroup(M,yarnType){return(M.yarnGroups||[]).find(g=>(g.members||[]).includes(yarnType))||null;}
-function groupAlternatives(M,yarnType){const g=findYarnGroup(M,yarnType);return g?(g.members||[]).filter(m=>m!==yarnType):[];}
-function groupStock(M,yarnType,yBal,pBal){
-  const g=findYarnGroup(M,yarnType);if(!g)return null;
-  const members=g.members||[];
-  const gdTotal=members.reduce((a,yt)=>a+Object.entries(yBal).filter(([k])=>k.startsWith(yt+"||")).reduce((b,[,v])=>b+v,0),0);
-  const ptyTotal=members.reduce((a,yt)=>a+Object.values(pBal).reduce((b,py)=>b+(py[yt]||0),0),0);
-  return{group:g,gdTotal,ptyTotal,total:gdTotal+ptyTotal,members};
-}
+const GRADE_BG={1:"#D1FAE5",2:"#FEF3C7",3:"#F3F4F6"};
+// Grade is manually assigned per (yarnType + mill) pair.
+// E.g. "60s Cotton" + "Vishwateja Gold" = Grade 1, "60s Cotton" + "Hakumba Mill" = Grade 3
+function getYarnGrade(M,yarnType,mill){return(M.yarnGrades||[]).find(g=>g.yarnType===yarnType&&g.mill===mill)||null;}
+function millGradesForYarn(M,yarnType){return(M.yarnGrades||[]).filter(g=>g.yarnType===yarnType).sort((a,b)=>(+a.grade||9)-(+b.grade||9));}
+function gradedYarnTypes(M){return[...new Set((M.yarnGrades||[]).map(g=>g.yarnType))];}
+
 
 // ── YARN INWARD ──
 function PInw({firm,M,inw,parties,toast2,updM,fname}){
@@ -910,11 +903,11 @@ function parseRS(v){return+String(v).replace(/[^0-9.]/g,"")||0}
 
 function PBms({firm,M,bms,fab,pBal,yBal,toast2,updM,fname}){
   const[editId,setEditId]=useState(null);
-  const startEdit=(r)=>{setEditId(r._id);sf({date:r.date||today(),beamType:r.beamType||"weaving",beamNo:r.beamNo||"",weaver:r.weaver||"",designNo:r.designNo||"",reedSpace:r.reedSpace||"",reed:r.reed||"",pick:r.pick||"",totalEnds:r.totalEnds||"",totalMeters:r.totalMeters||"",tapeline:r.tapeline||"",cuts:r.cuts||"",warpYarns:r.warpYarns||[],weftYarns:r.weftYarns||[],crimp:r.crimp||"",actualKg:r.actualKg!=null&&r.actualKg!==""?r.actualKg:"",remarks:r.remarks||"",status:r.status||"In weaving"})};
+  const startEdit=(r)=>{setEditId(r._id);sf({date:r.date||today(),beamType:r.beamType||"weaving",beamNo:r.beamNo||"",weaver:r.weaver||"",designNo:r.designNo||"",reedSpace:r.reedSpace||"",reed:r.reed||"",pick:r.pick||"",totalEnds:r.totalEnds||"",totalMeters:r.totalMeters||"",tapeline:r.tapeline||"",cuts:r.cuts||"",warpYarns:r.warpYarns||[],weftYarns:r.weftYarns||[],crimp:r.crimp||"",actualKgByYarn:r.actualKgByYarn||{},remarks:r.remarks||"",status:r.status||"In weaving"})};
   const cancelEdit=()=>{setEditId(null);sf(ini)};
   const all=[...M.weavers,...M.sizers];
   const sts=["In sizing","Sizing done","In weaving","Weaving done","Fabric received","On hold","Closed"];
-  const ini={date:today(),beamType:"weaving",beamNo:"",weaver:"",designNo:"",reedSpace:"",reed:"",pick:"",totalEnds:"",totalMeters:"",tapeline:"",cuts:"",warpYarns:[],weftYarns:[],crimp:"",actualKg:"",remarks:"",status:"In weaving"};
+  const ini={date:today(),beamType:"weaving",beamNo:"",weaver:"",designNo:"",reedSpace:"",reed:"",pick:"",totalEnds:"",totalMeters:"",tapeline:"",cuts:"",warpYarns:[],weftYarns:[],crimp:"",actualKgByYarn:{},remarks:"",status:"In weaving"};
   const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
   const[ws,setWs]=useState(""),[fts,setFts]=useState("");
   const[srch,setSrch]=useState(""),[fst,setFst]=useState("");
@@ -977,7 +970,13 @@ function PBms({firm,M,bms,fab,pBal,yBal,toast2,updM,fname}){
   async function sub(){if(!f.beamNo||!f.weaver||!f.designNo){toast2("Fill required fields","err");return}
     const isSz=f.beamType==="sizing";
     const totalM=isSz&&f.tapeline&&f.cuts?(+f.tapeline*(+f.cuts||0)):(+f.totalMeters);
-    const save={...f,pick:+f.pick||0,totalEnds:+f.totalEnds,totalMeters:totalM,tapeline:+f.tapeline||0,cuts:+f.cuts||0,crimp:f.crimp!==""?+f.crimp:0,actualKg:f.actualKg!==""?+f.actualKg:""};
+    // Per-yarn actual consumption — warp uses y.t key, weft uses "weft-"+y.t key
+    const actualKgByYarn={};
+    Object.entries(f.actualKgByYarn||{}).forEach(([k,v])=>{
+      if(v!==""&&v!=null&&!isNaN(+v)&&+v>=0)actualKgByYarn[k]=+v;
+    });
+    const actualKgTotal=Object.keys(actualKgByYarn).length>0?Object.values(actualKgByYarn).reduce((a,v)=>a+v,0):"";
+    const save={...f,pick:+f.pick||0,totalEnds:+f.totalEnds,totalMeters:totalM,tapeline:+f.tapeline||0,cuts:+f.cuts||0,crimp:f.crimp!==""?+f.crimp:0,actualKgByYarn,actualKg:actualKgTotal};
     if(editId){await dbUpdate(firm,"beams",editId,save);setEditId(null);}
     else{await dbs(firm,"beams",uid(),save);}
     sf(ini);toast2(editId?"Beam updated!":"Beam saved!")}
@@ -1019,9 +1018,8 @@ function PBms({firm,M,bms,fab,pBal,yBal,toast2,updM,fname}){
         h("div",{className:"fr c2"},FL("Reed space (inches)",h("input",{value:f.reedSpace,onChange:e=>s("reedSpace",e.target.value),placeholder:"44"})),FL("Total meters",h("input",{type:"number",value:f.totalMeters,onChange:e=>s("totalMeters",e.target.value),placeholder:"meters to produce"}))),
         h("div",{className:"fr c2"},FL("Reed",h("input",{value:f.reed,onChange:e=>s("reed",e.target.value),placeholder:"68x2"})),FL("Pick (per inch)",h("input",{type:"number",value:f.pick,onChange:e=>s("pick",e.target.value)})))
       ),
-      h("div",{className:"fr c2"},
-        FL("Crimp % (warp)",h("input",{type:"number",value:f.crimp,onChange:e=>s("crimp",e.target.value),placeholder:"e.g. 3.5",title:"Warp crimp % — increases warp yarn consumption accordingly"})),
-        FL("Actual yarn consumed (Kg)",h("input",{type:"number",value:f.actualKg,onChange:e=>s("actualKg",e.target.value),placeholder:"Fill after beam is done",title:"Enter actual yarn consumed to compare vs estimated"}))
+      h("div",{className:"fr c1"},
+        FL("Crimp % (warp)",h("input",{type:"number",value:f.crimp,onChange:e=>s("crimp",e.target.value),placeholder:"e.g. 3.5",title:"Warp crimp % — reduces effective meters"}))
       ),
       // Warp & Weft yarn selection with % ratio
       h("div",{className:"fr c2",style:{marginBottom:8}},
@@ -1058,6 +1056,69 @@ function PBms({firm,M,bms,fab,pBal,yBal,toast2,updM,fname}){
           })
         )
       ),
+      // ── Actual yarn consumed (per yarn type) — fill after beam is done ──
+      (f.warpYarns.length>0||f.weftYarns.length>0)&&h("div",{style:{background:"var(--bg)",border:"1px solid var(--bdl)",borderRadius:"var(--r)",padding:"10px 12px",marginBottom:8}},
+        h("div",{style:{fontSize:11,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".05em",marginBottom:8}},
+          "Actual yarn consumed — fill after beam is done"
+        ),
+        // Warp yarns
+        f.warpYarns.length>0&&h("div",null,
+          f.warpYarns.map(y=>{
+            const estItem=hasCalc?warpCalc.find(c=>c.t===y.t):null;
+            const estKg=estItem?estItem.kg:null;
+            const actVal=(f.actualKgByYarn||{})[y.t]!=null?(f.actualKgByYarn||{})[y.t]:"";
+            const diff=estKg!=null&&actVal!==""?(+actVal-estKg):null;
+            return h("div",{key:"warp-"+y.t,style:{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}},
+              h("span",{className:"bdg bi",style:{fontSize:9,flexShrink:0}},"Warp"),
+              h("span",{style:{fontSize:12,flex:"0 0 auto",minWidth:110}},y.t),
+              h("input",{type:"number",value:actVal,
+                onChange:e=>s("actualKgByYarn",{...(f.actualKgByYarn||{}),[y.t]:e.target.value}),
+                placeholder:"Actual Kg",style:{width:110,height:30,fontSize:13}}),
+              h("span",{style:{fontSize:11,color:"var(--mu)"}},"Kg"),
+              estKg!=null&&h("span",{style:{fontSize:11,color:"var(--mu)"}},"(est: "+estKg.toFixed(1)+" Kg)"),
+              diff!=null&&h("span",{className:"mn fw5",style:{fontSize:11,color:Math.abs(diff)<0.5?"var(--ok)":diff>0?"var(--er)":"var(--ok)"}},
+                Math.abs(diff)<0.5?"✓":diff>0?"▲ +"+diff.toFixed(2)+" Kg":"▼ "+diff.toFixed(2)+" Kg"
+              )
+            );
+          })
+        ),
+        // Weft yarns (always shown when weft exists, regardless of sizing mode)
+        f.weftYarns.length>0&&h("div",{style:{marginTop:f.warpYarns.length>0?6:0}},
+          f.warpYarns.length>0&&h("div",{style:{height:1,background:"var(--bdl)",margin:"4px 0 6px"}}),
+          f.weftYarns.map(y=>{
+            const estItem=hasCalc?weftCalc.find(c=>c.t===y.t):null;
+            const estKg=estItem?estItem.kg:null;
+            const actKey="weft-"+y.t;
+            const actVal=(f.actualKgByYarn||{})[actKey]!=null?(f.actualKgByYarn||{})[actKey]:"";
+            const diff=estKg!=null&&actVal!==""?(+actVal-estKg):null;
+            return h("div",{key:actKey,style:{display:"flex",alignItems:"center",gap:8,marginBottom:6,flexWrap:"wrap"}},
+              h("span",{className:"bdg bo",style:{fontSize:9,flexShrink:0}},"Weft"),
+              h("span",{style:{fontSize:12,flex:"0 0 auto",minWidth:110}},y.t),
+              h("input",{type:"number",value:actVal,
+                onChange:e=>s("actualKgByYarn",{...(f.actualKgByYarn||{}),[actKey]:e.target.value}),
+                placeholder:"Actual Kg",style:{width:110,height:30,fontSize:13}}),
+              h("span",{style:{fontSize:11,color:"var(--mu)"}},"Kg"),
+              estKg!=null&&h("span",{style:{fontSize:11,color:"var(--mu)"}},"(est: "+estKg.toFixed(1)+" Kg)"),
+              diff!=null&&h("span",{className:"mn fw5",style:{fontSize:11,color:Math.abs(diff)<0.5?"var(--ok)":diff>0?"var(--er)":"var(--ok)"}},
+                Math.abs(diff)<0.5?"✓":diff>0?"▲ +"+diff.toFixed(2)+" Kg":"▼ "+diff.toFixed(2)+" Kg"
+              )
+            );
+          })
+        ),
+        // Total summary
+        Object.values(f.actualKgByYarn||{}).some(v=>v!==""&&v!=null&&!isNaN(+v))&&h("div",{style:{display:"flex",gap:10,marginTop:8,paddingTop:6,borderTop:"1px solid var(--bdl)",fontSize:12,flexWrap:"wrap"}},
+          h("span",{style:{color:"var(--mu)"}},"Total actual:"),
+          h("span",{className:"mn fw5"},fmt(Object.values(f.actualKgByYarn||{}).filter(v=>v!==""&&!isNaN(+v)).reduce((a,v)=>a+(+v),0))+" Kg"),
+          hasCalc&&totalYarnKg>0&&h("span",{style:{color:"var(--mu)"}},"vs est "+totalYarnKg.toFixed(1)+" Kg"),
+          (()=>{
+            const tot=Object.values(f.actualKgByYarn||{}).filter(v=>v!==""&&!isNaN(+v)).reduce((a,v)=>a+(+v),0);
+            const d=hasCalc&&totalYarnKg>0?tot-totalYarnKg:null;
+            return d!=null&&h("span",{className:"mn fw5",style:{color:Math.abs(d)<0.5?"var(--ok)":d>0?"var(--er)":"var(--ok)"}},
+              Math.abs(d)<0.5?"✓ Matches":d>0?"▲ +"+d.toFixed(2)+" Kg":"▼ "+d.toFixed(2)+" Kg"
+            );
+          })()
+        )
+      ),
       // ── YARN STOCK CHECK vs WEAVER BALANCE ──
       f.weaver&&(f.warpYarns.length>0||f.weftYarns.length>0)&&(()=>{
         const allYarns=[...new Set([...f.warpYarns.map(y=>y.t),...f.weftYarns.map(y=>y.t)])];
@@ -1074,8 +1135,8 @@ function PBms({firm,M,bms,fab,pBal,yBal,toast2,updM,fname}){
             const shortfall=req!=null?Math.max(0,req-has):0;
             const ok=req==null||has>=req-0.5;
             const gdOpts=Object.entries(yBal).filter(([k,v])=>k.startsWith(yt+"||")&&v>0).map(([k,v])=>{const[,gd]=k.split("||");return{gd,qty:v}}).sort((a,b)=>b.qty-a.qty);
-            const grp=findYarnGroup(M,yt);
-            const altsInStock=grp?(grp.members||[]).filter(m=>m!==yt&&(weaverBal[m]||0)>0):[];
+            const grp=millGradesForYarn(M,yt);
+            const altsInStock=grp.filter(g=>(weaverBal[yt]||0)>0); // same yarn with grade info
             return h("div",{key:yt,style:{padding:"4px 0",borderBottom:"1px solid var(--bdl)",display:"flex",flexWrap:"wrap",alignItems:"center",gap:8}},
               h("span",{style:{fontSize:12,flex:"0 0 auto",minWidth:120}},yt),
               h("span",{className:"mn",style:{fontSize:12,color:has===0?"var(--er)":has<50?"var(--wn)":"var(--ok)"}},fmt(has)+" Kg held"),
@@ -1083,8 +1144,11 @@ function PBms({firm,M,bms,fab,pBal,yBal,toast2,updM,fname}){
               ok?h("span",{className:"bdg bo",style:{fontSize:9}},"✓ OK"):
                 h("span",{className:"bdg be",style:{fontSize:9}},fmt(shortfall.toFixed(1))+" Kg short"+(gdOpts.length>0?" → issue from "+gdOpts[0].gd+" ("+fmt(gdOpts[0].qty)+" Kg)":"")),
               !ok&&gdOpts.length===0&&h("span",{style:{fontSize:10,color:"var(--er)"}},"No godown stock!"),
-              grp&&h("span",{className:"bdg",style:{fontSize:9,background:"var(--bg)",color:"var(--mu)",border:"1px solid var(--bdl)"}},"🏷 "+grp.name+" G"+(grp.grade||1)),
-              !ok&&altsInStock.length>0&&h("span",{style:{fontSize:10,color:"var(--in)"}},"✓ Group sub: "+altsInStock.map(a=>a+" ("+fmt(weaverBal[a])+"Kg)").join(", "))
+              grp.length>0&&h("div",{style:{display:"flex",gap:4,flexWrap:"wrap"}},
+                grp.map(g=>h("span",{key:g.id||g.mill,className:"bdg",style:{background:GRADE_BG[+g.grade||1],color:GRADE_COLORS[+g.grade||1],border:"1px solid currentColor",fontSize:9}},
+                  "G"+(g.grade||"?")+" "+g.mill
+                ))
+              )
             );
           })
         );
@@ -1138,8 +1202,8 @@ function PBms({firm,M,bms,fab,pBal,yBal,toast2,updM,fname}){
     ),
     h("div",{className:"card"},
       h("div",{className:"chd"},h("div",{className:"ct"},"Register ("+bms.length+")"),h("div",{className:"bgrp"},
-        h("button",{className:"btn btn-sm btn-pr no-print",onClick:()=>prnt(fname,"Beam Register",["Date","Beam","Weaver","Design","Meters","Rcvd m","Pending m","Crimp%","Warp Kg","Weft Kg","Est. Total Kg","Wt/100m Kg","Actual Kg","Diff Kg","Status"],filt.map(r=>{const c=beamCalc(r);const warp=c?c.items.filter(x=>x.role==="warp").reduce((a,x)=>a+x.kg,0):0;const weft=c?c.items.filter(x=>x.role==="weft").reduce((a,x)=>a+x.kg,0):0;const est=c?c.total:null;const wt100=c&&c.effMeters>0?(c.total/c.effMeters)*100:null;const act=r.actualKg!=null&&r.actualKg!==""?+r.actualKg:null;const diff=est!=null&&act!=null?act-est:null;const rcvdM=fab.filter(f=>f.designNo&&r.designNo&&f.designNo.trim().toLowerCase()===r.designNo.trim().toLowerCase()).reduce((a,f)=>a+(+f.meters||0),0);const pendM=r.totalMeters?Math.max(0,(+r.totalMeters||0)-rcvdM):null;return[fmtD(r.date),r.beamNo,r.weaver,r.designNo,r.totalMeters,fmt(rcvdM),pendM!=null?fmt(pendM):"",r.crimp||"",warp?warp.toFixed(2):"",weft?weft.toFixed(2):"",c?c.total.toFixed(2):"",wt100!=null?wt100.toFixed(3):"",act!=null?act.toFixed(2):"",diff!=null?diff.toFixed(2):"",r.status]}))},"🖨 Print"),
-        h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("beams",["Date","Beam No","Weaver","Design","Meters","Rcvd m","Pending m","Crimp%","Est. Total Kg","Wt/100m Kg","Actual Kg","Diff Kg","Status"],filt.map(r=>{const c=beamCalc(r);const est=c?c.total:null;const wt100=c&&c.effMeters>0?(c.total/c.effMeters)*100:null;const act=r.actualKg!=null&&r.actualKg!==""?+r.actualKg:null;const diff=est!=null&&act!=null?act-est:null;const rcvdM=fab.filter(f=>f.designNo&&r.designNo&&f.designNo.trim().toLowerCase()===r.designNo.trim().toLowerCase()).reduce((a,f)=>a+(+f.meters||0),0);const pendM=r.totalMeters?Math.max(0,(+r.totalMeters||0)-rcvdM):null;return[fmtD(r.date),r.beamNo,r.weaver,r.designNo,r.totalMeters,rcvdM,pendM!=null?pendM:"",r.crimp||"",c?c.total.toFixed(2):"",wt100!=null?wt100.toFixed(3):"",act!=null?act.toFixed(2):"",diff!=null?diff.toFixed(2):"",r.status]}))},"⬇ Excel")
+        h("button",{className:"btn btn-sm btn-pr no-print",onClick:()=>prnt(fname,"Beam Register",["Date","Beam","Weaver","Design","Meters","Rcvd m","Pending m","Crimp%","Warp Kg","Weft Kg","Est. Total Kg","Wt/100m Kg","Actual Kg","Diff Kg","Status"],filt.map(r=>{const c=beamCalc(r);const warp=c?c.items.filter(x=>x.role==="warp").reduce((a,x)=>a+x.kg,0):0;const weft=c?c.items.filter(x=>x.role==="weft").reduce((a,x)=>a+x.kg,0):0;const est=c?c.total:null;const byYA=r.actualKgByYarn||{};const act=Object.keys(byYA).length>0?Object.values(byYA).reduce((a,v)=>a+(+v||0),0):(r.actualKg!=null&&r.actualKg!==""?+r.actualKg:null);const diff=est!=null&&act!=null?act-est:null;const wt100=(act!=null&&c&&c.effMeters>0?act/c.effMeters*100:c&&c.effMeters>0?c.total/c.effMeters*100:null);const rcvdM=fab.filter(f=>f.designNo&&r.designNo&&f.designNo.trim().toLowerCase()===r.designNo.trim().toLowerCase()).reduce((a,f)=>a+(+f.meters||0),0);const pendM=r.totalMeters?Math.max(0,(+r.totalMeters||0)-rcvdM):null;return[fmtD(r.date),r.beamNo,r.weaver,r.designNo,r.totalMeters,fmt(rcvdM),pendM!=null?fmt(pendM):"",r.crimp||"",warp?warp.toFixed(2):"",weft?weft.toFixed(2):"",c?c.total.toFixed(2):"",wt100!=null?wt100.toFixed(3):"",act!=null?act.toFixed(2):"",diff!=null?diff.toFixed(2):"",r.status]}))},"🖨 Print"),
+        h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("beams",["Date","Beam No","Weaver","Design","Meters","Rcvd m","Pending m","Crimp%","Est. Total Kg","Wt/100m Kg","Actual Kg","Diff Kg","Status"],filt.map(r=>{const c=beamCalc(r);const est=c?c.total:null;const byYA=r.actualKgByYarn||{};const act=Object.keys(byYA).length>0?Object.values(byYA).reduce((a,v)=>a+(+v||0),0):(r.actualKg!=null&&r.actualKg!==""?+r.actualKg:null);const diff=est!=null&&act!=null?act-est:null;const wt100=(act!=null&&c&&c.effMeters>0?act/c.effMeters*100:c&&c.effMeters>0?c.total/c.effMeters*100:null);const rcvdM=fab.filter(f=>f.designNo&&r.designNo&&f.designNo.trim().toLowerCase()===r.designNo.trim().toLowerCase()).reduce((a,f)=>a+(+f.meters||0),0);const pendM=r.totalMeters?Math.max(0,(+r.totalMeters||0)-rcvdM):null;return[fmtD(r.date),r.beamNo,r.weaver,r.designNo,r.totalMeters,rcvdM,pendM!=null?pendM:"",r.crimp||"",c?c.total.toFixed(2):"",wt100!=null?wt100.toFixed(3):"",act!=null?act.toFixed(2):"",diff!=null?diff.toFixed(2):"",r.status]}))},"⬇ Excel")
       )),
       h("div",{className:"sbr"},h("input",{placeholder:"Search beam, weaver, design...",value:srch,onChange:e=>setSrch(e.target.value)}),h("select",{value:fst,onChange:e=>setFst(e.target.value),style:{height:34}},h("option",{value:""},"All statuses"),sts.map(st=>h("option",{key:st,value:st},st)))),
       filt.length===0?Em("No beams"):
@@ -1149,9 +1213,23 @@ function PBms({firm,M,bms,fab,pBal,yBal,toast2,updM,fname}){
           const d=daysAgo(r.date),done=["Fabric received","Closed"].includes(r.status);
           const c=beamCalc(r);
           const estKg=c?c.total:null;
-          const actKg=r.actualKg!=null&&r.actualKg!==""?+r.actualKg:null;
-          const diff=estKg!=null&&actKg!=null?actKg-estKg:null;
-          const wt100=c&&c.effMeters>0?(c.total/c.effMeters)*100:null;
+          // Per-yarn actual consumption — warp stored as y.t, weft stored as "weft-"+y.t
+          const byYarnAct=r.actualKgByYarn||{};
+          const hasActual=Object.keys(byYarnAct).length>0;
+          // Build display items: each {label, yarnType, key, role, actual, estimated}
+          const actItems=[
+            ...(r.warpYarns||[]).map(y=>({yt:y.t,key:y.t,role:"W",est:c?.items.find(x=>x.role==="warp"&&x.t===y.t)?.kg,act:byYarnAct[y.t]})),
+            ...(r.weftYarns||[]).map(y=>({yt:y.t,key:"weft-"+y.t,role:"F",est:c?.items.find(x=>x.role==="weft"&&x.t===y.t)?.kg,act:byYarnAct["weft-"+y.t]}))
+          ].filter(x=>x.act!=null||(r.actualKg!=null&&r.actualKg!==""));
+          // Fallback for old single actualKg
+          const actKgTotal=hasActual
+            ?Object.values(byYarnAct).reduce((a,v)=>a+(+v||0),0)
+            :(r.actualKg!=null&&r.actualKg!==""?+r.actualKg:null);
+          const diff=estKg!=null&&actKgTotal!=null?actKgTotal-estKg:null;
+          // Weight/100m: prefer actual consumption if entered, fall back to estimate
+          const wt100est=c&&c.effMeters>0?(c.total/c.effMeters)*100:null;
+          const wt100act=actKgTotal!=null&&c&&c.effMeters>0?(actKgTotal/c.effMeters)*100:null;
+          const wt100=wt100act??wt100est;
           const fabMatch=fab.filter(f=>f.designNo&&r.designNo&&f.designNo.trim().toLowerCase()===r.designNo.trim().toLowerCase());
           const rcvdM=fabMatch.reduce((a,f)=>a+(+f.meters||0),0);
           const pendM=r.totalMeters?Math.max(0,(+r.totalMeters||0)-rcvdM):null;
@@ -1182,9 +1260,31 @@ function PBms({firm,M,bms,fab,pBal,yBal,toast2,updM,fname}){
               anyOvr&&h("span",{className:"bdg be",style:{fontSize:9,marginLeft:4}},"⚡ ovr"),
               h("div",{style:{fontSize:10,color:"var(--mu)",marginTop:2}},c.items.map(x=>{const ov=(M.yarnDenierOverride||{})[x.t];return x.t+"("+x.kg.toFixed(1)+(ov&&+ov>0?" ⚡"+ov+"d":"")+")"}).join(" + "))
             ):"—"),
-            Td(wt100!=null?h("span",{className:"mn",style:{color:"var(--acd)",fontSize:11}},wt100.toFixed(3)+" Kg"):"—"),
-            Td(actKg!=null?h("span",{className:"mn fw5"},actKg.toFixed(2)+" Kg"):h("span",{className:"tm",style:{fontSize:11}},"—")),
-            Td(diff!=null?h("span",{className:"mn fw5",style:{color:diff>0?"var(--er)":diff<0?"var(--ok)":"var(--mu)",fontSize:12}},(diff>0?"▲ +":"▼ ")+diff.toFixed(2)+" Kg"):h("span",{className:"tm",style:{fontSize:11}},"—")),
+            Td(wt100!=null?h("div",null,
+              h("span",{className:"mn",style:{color:"var(--acd)",fontSize:11}},wt100.toFixed(3)+" Kg"),
+              wt100act!=null&&wt100est!=null&&Math.abs(wt100act-wt100est)>0.001&&h("div",{style:{fontSize:9,color:"var(--mu)"}},
+                "est: "+wt100est.toFixed(3)+" Kg"
+              )
+            ):"—"),
+            Td(actKgTotal!=null?h("div",null,
+              actItems.filter(x=>x.act!=null).length>1&&h("div",{style:{fontSize:10,marginBottom:3}},
+                actItems.filter(x=>x.act!=null).map(x=>{
+                  const d=x.est!=null?+x.act-x.est:null;
+                  return h("div",{key:x.key,style:{display:"flex",justifyContent:"space-between",gap:6,borderBottom:"1px dotted var(--bdl)",padding:"1px 0"}},
+                    h("span",{style:{color:"var(--mu)",fontSize:10}},
+                      h("span",{className:"bdg "+(x.role==="W"?"bi":"bo"),style:{fontSize:8,padding:"0 3px"}},x.role==="W"?"W":"F"),
+                      " "+x.yt
+                    ),
+                    h("span",{className:"mn",style:{fontSize:10}},fmt(+x.act)+"Kg"+(d!=null&&Math.abs(d)>0.5?" "+(d>0?"▲+":"▼")+Math.abs(d).toFixed(1):"")+(d!=null&&Math.abs(d)<=0.5?" ✓":""))
+                  );
+                })
+              ),
+              h("span",{className:"mn fw5"},fmt(actKgTotal)+" Kg")
+            ):h("span",{className:"tm",style:{fontSize:11}},"—")),
+            Td(diff!=null?h("span",{className:"mn fw5",style:{color:Math.abs(diff)<0.5?"var(--ok)":diff>0?"var(--er)":"var(--ok)",fontSize:12}},
+              (Math.abs(diff)<0.5?"✓":diff>0?"▲ +":"▼ ")+diff.toFixed(2)+" Kg"
+            ):h("span",{className:"tm",style:{fontSize:11}},"—")),
+            Td(diff!=null?h("span",{className:"mn fw5",style:{color:Math.abs(diff)<0.5?"var(--ok)":diff>0?"var(--er)":"var(--ok)",fontSize:12}},(Math.abs(diff)<0.5?"✓":diff>0?"▲ +":"▼ ")+diff.toFixed(2)+" Kg"):h("span",{className:"tm",style:{fontSize:11}},"—")),
             Td(h("span",{className:done?"tm":d>30?"ln":d>15?"mn fw5":"mn"},d+"d")),
             h("td",null,h("select",{value:r.status||"",onChange:e=>updSt(r,e.target.value),style:{height:26,fontSize:11,padding:"2px 22px 2px 6px"}},sts.map(st=>h("option",{key:st,value:st},st)))),
             Td(h("div",{style:{display:"flex",gap:4}},h("button",{className:"btn btn-sm btn-edit no-print",onClick:()=>startEdit(r)},"Edit"),h("button",{className:"btn btn-sm btn-del no-print",onClick:()=>del(r._id)},"Del")))
@@ -1485,70 +1585,7 @@ function PLed({yBal,yBalT,pBal,bmConsumed,inw,iss,trf,fab,M,parties,firm,toast2,
         view==="godown"?FL("Filter godown",h("select",{value:fg,onChange:e=>setFg(e.target.value)},h("option",{value:""},"All godowns"),M.godowns.map(g=>h("option",{key:g,value:g},g)))):h("div",null)
       ),
 
-      // ── 🏷 GROUPS VIEW ──
-      view==="groups"&&(()=>{
-        const groups=M.yarnGroups||[];
-        if(groups.length===0)return h("div",null,Em("No yarn groups yet."),h("div",{style:{textAlign:"center",marginTop:8,fontSize:12,color:"var(--mu)"}},"Go to Masters → Yarn Groups to create groups and assign yarns."));
-        return h("div",null,
-          h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:10,fontSize:11,color:"var(--in)",lineHeight:1.6}},"🏷 Groups show combined stock across all member yarns. Yarns in the same group and grade are interchangeable substitutes."),
-          [1,2,3].map(grade=>{
-            const gradeGroups=groups.filter(g=>(+g.grade||1)===grade);
-            if(!gradeGroups.length)return null;
-            return h("div",{key:grade,style:{marginBottom:16}},
-              h("div",{style:{fontWeight:600,fontSize:13,color:GRADE_COLORS[grade],marginBottom:8,display:"flex",gap:8,alignItems:"center"}},
-                h("span",{className:"bdg",style:{background:grade===1?"#D1FAE5":grade===2?"#FEF3C7":"#F3F4F6",color:GRADE_COLORS[grade],border:"1px solid currentColor",fontSize:11}},GRADE_LABELS[grade]),
-                h("span",{style:{fontSize:11,color:"var(--mu)"}},gradeGroups.length+" group"+(gradeGroups.length>1?"s":""))
-              ),
-              gradeGroups.map(grp=>{
-                const members=grp.members||[];
-                const mData=members.map(yt=>{
-                  const gd=Object.entries(yBal).filter(([k])=>k.startsWith(yt+"||")).reduce((a,[,v])=>a+v,0);
-                  const pty=Object.values(pBal).reduce((a,py)=>a+(py[yt]||0),0);
-                  const total=gd+pty,min=+((M.yarnMinStock||{})[yt])||0,rt=+((M.yarnRates||{})[yt])||0;
-                  return{yt,gd,pty,total,min,rt};
-                });
-                const grpTotal=mData.reduce((a,d)=>a+d.total,0);
-                const grpVal=mData.reduce((a,d)=>a+d.total*d.rt,0);
-                const anyLow=mData.some(d=>d.min>0&&d.total<d.min);
-                const allOut=mData.every(d=>d.total<=0);
-                return h("div",{key:grp.id||grp.name,style:{marginBottom:12,border:"1px solid var(--bdl)",borderRadius:"var(--rl)",overflow:"hidden"}},
-                  h("div",{style:{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:allOut?"#FFF1F2":anyLow?"#FFFBEB":"var(--okb)",borderBottom:"1px solid var(--bdl)"}},
-                    h("div",{style:{flex:1}},
-                      h("div",{style:{fontWeight:600,fontSize:14}},grp.name),
-                      grp.description&&h("div",{style:{fontSize:11,color:"var(--mu)"}},grp.description)
-                    ),
-                    h("div",{style:{textAlign:"right"}},
-                      h("div",{className:"mn fw5",style:{fontSize:15,color:allOut?"var(--er)":anyLow?"var(--wn)":"var(--ok)"}},fmt(grpTotal)+" Kg"),
-                      grpVal>0&&h("div",{style:{fontSize:11,color:"var(--mu)"}},"₹"+fmt(grpVal)),
-                      allOut&&h("span",{className:"bdg be",style:{fontSize:9}},"ALL OUT"),
-                      !allOut&&anyLow&&h("span",{className:"bdg bw",style:{fontSize:9}},"SOME LOW")
-                    )
-                  ),
-                  h("div",{className:"tw"},h("table",null,
-                    h("thead",null,h("tr",null,TH(["Yarn type","Godown Kg","Party Kg","Total","Min","Status","Substitute if low"]))),
-                    h("tbody",null,mData.map(d=>{
-                      const isLow=d.min>0&&d.total<d.min;
-                      const altStr=mData.filter(o=>o.yt!==d.yt&&o.total>0).map(o=>o.yt+" ("+fmt(o.total)+"Kg)").join(" / ");
-                      return h("tr",{key:d.yt,style:{background:d.total<=0?"#FFF5F5":""}},
-                        h("td",{style:{padding:"6px 10px"}},h("span",{className:"bdg bi",style:{fontSize:10}},d.yt)),
-                        Td(fmt(d.gd)+" Kg","mn"),Td(d.pty>0?fmt(d.pty)+" Kg":"—","mn"),
-                        h("td",null,h("span",{className:"mn fw5",style:{color:d.total<=0?"var(--er)":isLow?"var(--wn)":"var(--ok)"}},fmt(d.total)+" Kg")),
-                        Td(d.min?fmt(d.min)+" Kg":"—","mn tm"),
-                        Td(h("span",{className:"bdg "+(d.total<=0?"be":isLow?"bw":"bo")},d.total<=0?"Out":isLow?"Low":"OK")),
-                        h("td",{style:{padding:"6px 10px",fontSize:11,color:altStr?"var(--in)":"var(--mu)"}},
-                          (isLow||d.total<=0)&&altStr?h("span",null,"✓ "+altStr):"—"
-                        )
-                      );
-                    }))
-                  ))
-                );
-              })
-            );
-          })
-        );
-      })(),
-
-      // ── 📍 LOCATION VIEW (default) ──
+      // ── 🏷 YARN GRADES VIEW ──      view==="groups"&&(()=>{        const grades=M.yarnGrades||[];        if(grades.length===0)return h("div",null,          Em("No grade assignments yet."),          h("div",{style:{textAlign:"center",marginTop:8,fontSize:12,color:"var(--mu)"}},"Go to Masters → 🏷 Yarn Grades to assign grades.")        );        // Group by yarn type        const byYarn={};        grades.forEach(g=>{if(!byYarn[g.yarnType])byYarn[g.yarnType]=[];byYarn[g.yarnType].push(g);});        Object.values(byYarn).forEach(arr=>arr.sort((a,b)=>(+a.grade||9)-(+b.grade||9)));        const yStock=(yt)=>{          const gd=Object.entries(yBal).filter(([k])=>k.startsWith(yt+"||")).reduce((a,[,v])=>a+v,0);          const pty=Object.values(pBal).reduce((a,py)=>a+(py[yt]||0),0);          return{gd,pty,total:gd+pty};        };        return h("div",null,          h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:10,fontSize:11,color:"var(--in)",lineHeight:1.6}},            "🏷 Shows grade assigned to each Yarn Type + Mill. E.g. 60s Cotton from Vishwateja Gold = Grade 1, from Hakumba Mill = Grade 3. Manage in Masters → 🏷 Yarn Grades."          ),          Object.entries(byYarn).sort(([a],[b])=>a.localeCompare(b)).map(([yt,mg])=>{            const s=yStock(yt); const min=+((M.yarnMinStock||{})[yt])||0; const isLow=min>0&&s.total<min;            return h("div",{key:yt,style:{marginBottom:12,border:"1px solid var(--bdl)",borderRadius:"var(--rl)",overflow:"hidden"}},              h("div",{style:{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:s.total<=0?"#FFF1F2":isLow?"#FFFBEB":"var(--okb)",borderBottom:"1px solid var(--bdl)"}},                h("div",{style:{flex:1}},                  h("div",{style:{fontWeight:700,fontSize:15}},yt),                  h("div",{style:{fontSize:11,color:"var(--mu)",marginTop:2}},mg.length+" mill"+(mg.length>1?"s":"")+" graded")                ),                h("div",{style:{textAlign:"right"}},                  h("div",{className:"mn fw5",style:{fontSize:16,color:s.total<=0?"var(--er)":isLow?"var(--wn)":"var(--ok)"}},fmt(s.total)+" Kg"),                  s.gd>0&&h("div",{style:{fontSize:11,color:"var(--mu)"}},"Godown: "+fmt(s.gd)+" Kg"),                  s.pty>0&&h("div",{style:{fontSize:11,color:"var(--mu)"}},"Parties: "+fmt(s.pty)+" Kg"),                  min>0&&isLow&&h("span",{className:"bdg be",style:{fontSize:9}},"Below min "+fmt(min)+" Kg")                )              ),              h("div",{className:"tw"},h("table",null,                h("thead",null,h("tr",null,TH(["Mill","Grade","Total Received (inward)","Avg Rate","Note"]))),                h("tbody",null,                  mg.map((g,gi)=>{                    const millInw=inw.filter(r=>r.yarnType===yt&&r.mill===g.mill);                    const rcvd=millInw.reduce((a,r)=>a+(+r.totalKg||0),0);                    const val=millInw.reduce((a,r)=>a+((+r.ratePerKg||0)*(+r.totalKg||0)),0);                    const avg=rcvd>0?val/rcvd:0;                    const otherGrades=mg.filter((_,j)=>j!==gi).map(o=>"G"+o.grade+" ("+o.mill+")").join(", ");                    return h("tr",{key:g.id||gi,style:{borderTop:"1px solid var(--bdl)"}},                      h("td",{style:{padding:"7px 10px",fontWeight:600}},g.mill),                      h("td",{style:{padding:"7px 10px"}},h("span",{className:"bdg",style:{background:GRADE_BG[+g.grade||1],color:GRADE_COLORS[+g.grade||1],border:"1px solid currentColor",fontSize:10}},GRADE_LABELS[+g.grade||1])),                      Td(rcvd>0?h("span",{className:"mn"},fmt(rcvd)+" Kg"):"No inward yet","mn"),                      Td(avg>0?"₹"+fmt(avg.toFixed(0))+"/Kg":"—","mn tm"),                      Td(otherGrades?h("span",{style:{fontSize:11,color:"var(--mu)"}},"Other grades: "+otherGrades):"Only grade assigned","mn tm")                    );                  }),                  // Show mills that have inward but no grade yet                  (()=>{                    const gradedMills=new Set(mg.map(g=>g.mill));                    const ungradedMills=[...new Set(inw.filter(r=>r.yarnType===yt&&r.mill&&!gradedMills.has(r.mill)).map(r=>r.mill))];                    return ungradedMills.map(mill=>h("tr",{key:mill,style:{borderTop:"1px solid var(--bdl)",background:"#FFFBEB"}},                      h("td",{style:{padding:"7px 10px",color:"var(--wn)"}},mill),                      Td(h("span",{className:"bdg bw",style:{fontSize:9}},"No grade yet"),"mn"),                      Td(fmt(inw.filter(r=>r.yarnType===yt&&r.mill===mill).reduce((a,r)=>a+(+r.totalKg||0),0))+" Kg received","mn"),                      h("td",{colSpan:2,style:{padding:"7px 10px",fontSize:11,color:"var(--wn)"}},"Go to Masters → 🏷 Yarn Grades to assign")                    ));                  })()                )              ))            );          })        );      })(),      // ── 📍 LOCATION VIEW (default) ──
       view==="location"&&h("div",null,
         h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"8px 12px",marginBottom:10,fontSize:11,color:"var(--in)",lineHeight:1.7}},
           "📍 Shows where every kg of yarn physically is. 🏭 Own = your godown that is also a Weaver/Sizer (combined balance — godown un-issued + party issued). 🏭 Godown = pure storage. 👤 Party = external weaver/sizer."
@@ -1919,69 +1956,78 @@ function PMas({M,updM,toast2}){
     const rm=async(item)=>{await updM(mk,items.filter(x=>x!==item));toast2(item+" removed")};
     return h("div",{className:"card"},h("div",{className:"ct",style:{marginBottom:10}},title),h("div",{className:"addr"},h("input",{value:v,onChange:e=>setV(e.target.value),onKeyDown:e=>e.key==="Enter"&&add(),placeholder:"Add..."}),h("button",{className:"btn btn-p btn-sm",onClick:add},"+ Add")),items.length===0?h("p",{className:"tm",style:{fontSize:12}},"No items."):items.map(item=>h("div",{key:item,className:"ml-i"},h("span",{style:{fontSize:13}},h("span",{style:{marginRight:7,opacity:.4}},ic),item),h("button",{className:"btn btn-sm btn-del",onClick:()=>rm(item)},"Remove"))));
   }
-  function YarnGroupsM(){
-    const groups=M.yarnGroups||[];
-    const[name,setName]=useState("");const[desc,setDesc]=useState("");const[grade,setGrade]=useState(1);
-    const[editIdx,setEditIdx]=useState(null);
-    const addGroup=async()=>{
-      if(!name.trim())return;
-      const newG={id:uid(),name:name.trim(),description:desc.trim(),grade:+grade,members:[]};
-      await updM("yarnGroups",[...groups,newG]);setName("");setDesc("");setGrade(1);
+  function YarnGradesM(){
+    const grades=M.yarnGrades||[];
+    const[nYt,setNYt]=useState(""),nt=setNYt;
+    const[nMill,setNMill]=useState(""),nm=setNMill;
+    const[nGrade,setNGrade]=useState(1);
+    const allMills=[...new Set([...(M.yarnMills||[]),...grades.map(g=>g.mill)])].filter(Boolean).sort();
+    const addEntry=async()=>{
+      if(!nYt||!nMill)return;
+      const filtered=(M.yarnGrades||[]).filter(g=>!(g.yarnType===nYt&&g.mill===nMill));
+      await updM("yarnGrades",[...filtered,{id:uid(),yarnType:nYt,mill:nMill,grade:+nGrade}]);
+      setNYt("");setNMill("");setNGrade(1);
     };
-    const rmGroup=async(id)=>updM("yarnGroups",groups.filter(g=>g.id!==id));
-    const toggleMember=async(grpId,yt)=>{
-      await updM("yarnGroups",groups.map(g=>{
-        if(g.id!==grpId)return g;
-        const mems=g.members||[];
-        return{...g,members:mems.includes(yt)?mems.filter(m=>m!==yt):[...mems,yt]};
-      }));
-    };
-    const setGroupGrade=async(grpId,g)=>updM("yarnGroups",groups.map(gr=>gr.id===grpId?{...gr,grade:+g}:gr));
+    const rmEntry=async(id)=>updM("yarnGrades",grades.filter(g=>g.id!==id));
+    const changeGrade=async(id,g)=>updM("yarnGrades",grades.map(e=>e.id===id?{...e,grade:+g}:e));
+    const byYarn={};
+    grades.forEach(g=>{if(!byYarn[g.yarnType])byYarn[g.yarnType]=[];byYarn[g.yarnType].push(g);});
+    Object.values(byYarn).forEach(arr=>arr.sort((a,b)=>(+a.grade||9)-(+b.grade||9)));
     return h("div",{className:"card"},
-      h("div",{className:"ct",style:{marginBottom:10}},"Yarn Groups — Grade & Substitution"),
-      h("div",{style:{fontSize:11,color:"var(--mu)",background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"7px 10px",marginBottom:10,lineHeight:1.6}},
-        "💡 Group yarn types that are interchangeable substitutes (e.g. all Grade 1 60s Cotton from different mills). Grade 1 = Premium, Grade 2 = Standard, Grade 3 = Economy. When a yarn is low, the system suggests same-group alternatives."
+      h("div",{className:"ct",style:{marginBottom:8}},"Yarn Grade Assignment"),
+      h("div",{style:{fontSize:11,color:"var(--mu)",background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"8px 10px",marginBottom:10,lineHeight:1.7}},
+        "💡 Assign a grade to each Yarn Type + Mill combination.",h("br",null),
+        "Example: 60s Cotton + Vishwateja Gold = Grade 1 (Premium), 60s Cotton + Hakumba Mill = Grade 3 (Economy).",h("br",null),
+        "Same mill can have different grades for different yarn types."
       ),
-      // Add group form
-      h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:12,alignItems:"flex-end"}},
-        h("div",null,h("label",{style:{fontSize:11,color:"var(--mu)"}},  "Group name"),h("input",{value:name,onChange:e=>setName(e.target.value),onKeyDown:e=>e.key==="Enter"&&addGroup(),placeholder:"e.g. 60s Cotton",style:{height:32,fontSize:13}})),
-        h("div",null,h("label",{style:{fontSize:11,color:"var(--mu)"}},"Grade"),h("select",{value:grade,onChange:e=>setGrade(e.target.value),style:{height:32,fontSize:13}},h("option",{value:1},"1 — Premium"),h("option",{value:2},"2 — Standard"),h("option",{value:3},"3 — Economy"))),
-        h("div",null,h("label",{style:{fontSize:11,color:"var(--mu)"}},"Description (optional)"),h("input",{value:desc,onChange:e=>setDesc(e.target.value),placeholder:"Brief note…",style:{height:32,fontSize:13,minWidth:180}})),
-        h("button",{className:"btn btn-p btn-sm",onClick:addGroup,style:{alignSelf:"flex-end"}},"+ Add group")
+      h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",alignItems:"flex-end",padding:"10px",background:"var(--bg)",borderRadius:"var(--r)",border:"1px solid var(--bdl)",marginBottom:12}},
+        h("div",null,
+          h("label",{style:{fontSize:11,color:"var(--mu)"}},"Yarn type *"),
+          h(AddSel,{val:nYt,fn:setNYt,opts:M.yarnTypes||[],placeholder:"Select yarn...",onAdd:v=>updM("yarnTypes",[...M.yarnTypes,v])})
+        ),
+        h("div",null,
+          h("label",{style:{fontSize:11,color:"var(--mu)"}},"Mill *"),
+          h(AddSel,{val:nMill,fn:setNMill,opts:allMills,placeholder:"Select mill...",onAdd:v=>updM("yarnMills",[...(M.yarnMills||[]),v])})
+        ),
+        h("div",null,
+          h("label",{style:{fontSize:11,color:"var(--mu)"}},"Grade"),
+          h("select",{value:nGrade,onChange:e=>setNGrade(e.target.value),style:{height:32,fontSize:13}},
+            h("option",{value:1},"Grade 1 - Premium"),
+            h("option",{value:2},"Grade 2 - Standard"),
+            h("option",{value:3},"Grade 3 - Economy")
+          )
+        ),
+        h("button",{className:"btn btn-p",style:{height:32,alignSelf:"flex-end"},onClick:addEntry},"+ Assign grade")
       ),
-      // Existing groups
-      groups.length===0?Em("No groups yet. Add one above."):
-      [1,2,3].map(g=>{
-        const gradeGrps=groups.filter(gr=>(+gr.grade||1)===g);
-        if(!gradeGrps.length)return null;
-        return h("div",{key:g,style:{marginBottom:12}},
-          h("div",{style:{fontWeight:600,fontSize:12,color:GRADE_COLORS[g],marginBottom:6}},GRADE_LABELS[g]),
-          gradeGrps.map(grp=>h("div",{key:grp.id,style:{border:"1px solid var(--bdl)",borderRadius:"var(--r)",marginBottom:8,overflow:"hidden"}},
-            h("div",{style:{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"var(--bg)"}},
-              h("div",{style:{flex:1}},
-                h("span",{style:{fontWeight:500}},grp.name),
-                grp.description&&h("span",{style:{fontSize:11,color:"var(--mu)",marginLeft:6}},grp.description)
-              ),
-              h("select",{value:grp.grade||1,onChange:e=>setGroupGrade(grp.id,e.target.value),style:{height:28,fontSize:11}},
-                h("option",{value:1},"G1"),h("option",{value:2},"G2"),h("option",{value:3},"G3")
-              ),
-              h("button",{className:"btn btn-sm btn-del",onClick:()=>rmGroup(grp.id)},"Del")
-            ),
-            h("div",{style:{padding:"8px 12px",display:"flex",flexWrap:"wrap",gap:6}},
-              h("div",{style:{width:"100%",fontSize:11,color:"var(--mu)",marginBottom:4}},"Click yarn types to add/remove from this group:"),
-              (M.yarnTypes||[]).map(yt=>{
-                const isMember=(grp.members||[]).includes(yt);
-                return h("button",{key:yt,onClick:()=>toggleMember(grp.id,yt),
-                  style:{padding:"3px 10px",fontSize:11,borderRadius:12,cursor:"pointer",border:"1px solid "+(isMember?"var(--acc)":"var(--bdl)"),background:isMember?"var(--acc)":"var(--bg)",color:isMember?"#fff":"var(--tx)",fontWeight:isMember?600:400}
-                },yt);
-              })
+      grades.length===0?Em("No grade assignments yet. Use the form above."):
+      h("div",null,
+        Object.entries(byYarn).sort(([a],[b])=>a.localeCompare(b)).map(([yt,entries])=>
+          h("div",{key:yt,style:{marginBottom:10,border:"1px solid var(--bdl)",borderRadius:"var(--r)",overflow:"hidden"}},
+            h("div",{style:{padding:"8px 12px",background:"var(--bg)",fontWeight:600,fontSize:13,borderBottom:"1px solid var(--bdl)"}},yt),
+            h("table",{style:{width:"100%",borderCollapse:"collapse"}},
+              h("thead",null,h("tr",{style:{background:"var(--bg)"}},TH(["Mill","Grade","Change grade",""]))),
+              h("tbody",null,entries.map(e=>
+                h("tr",{key:e.id,style:{borderTop:"1px solid var(--bdl)"}},
+                  h("td",{style:{padding:"7px 12px",fontWeight:500}},e.mill),
+                  h("td",{style:{padding:"7px 12px"}},
+                    h("span",{className:"bdg",style:{background:GRADE_BG[+e.grade||1],color:GRADE_COLORS[+e.grade||1],border:"1px solid currentColor",fontSize:10}},GRADE_LABELS[+e.grade||1])
+                  ),
+                  h("td",{style:{padding:"7px 12px"}},
+                    h("select",{value:e.grade||1,onChange:ev=>changeGrade(e.id,ev.target.value),style:{height:28,fontSize:11}},
+                      h("option",{value:1},"G1 - Premium"),
+                      h("option",{value:2},"G2 - Standard"),
+                      h("option",{value:3},"G3 - Economy")
+                    )
+                  ),
+                  h("td",{style:{padding:"7px 12px"}},h("button",{className:"btn btn-sm btn-del",onClick:()=>rmEntry(e.id)},"Del"))
+                )
+              ))
             )
-          ))
-        );
-      })
+          )
+        )
+      )
     );
   }
-
   function YarnSuppliersM(){
     const items=M.yarnSuppliers||[];const[v,setV]=useState("");
     const add=async()=>{if(!v.trim()||items.includes(v.trim()))return;await updM("yarnSuppliers",[...items,v.trim()]);setV("")};
@@ -2017,11 +2063,11 @@ function PMas({M,updM,toast2}){
       ))
     );
   }
-  const tabs=[{id:"yarn",l:"Yarn types"},{id:"groups",l:"🏷 Yarn Groups"},{id:"mills",l:"🏭 Mills"},{id:"suppliers",l:"Suppliers"},{id:"godowns",l:"Godowns"},{id:"weavers",l:"Weavers"},{id:"sizers",l:"Sizers"}];
+  const tabs=[{id:"yarn",l:"Yarn types"},{id:"grades",l:"🏷 Yarn Grades"},{id:"mills",l:"🏭 Mills"},{id:"suppliers",l:"Suppliers"},{id:"godowns",l:"Godowns"},{id:"weavers",l:"Weavers"},{id:"sizers",l:"Sizers"}];
   return h("div",null,
     h("div",{style:{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}},tabs.map(t=>h("button",{key:t.id,className:"btn"+(tab===t.id?" btn-p":""),style:{height:32,fontSize:12},onClick:()=>setTab(t.id)},t.l))),
     tab==="yarn"&&h(YarnM,null),
-    tab==="groups"&&h(YarnGroupsM,null),
+    tab==="grades"&&h(YarnGradesM,null),
     tab==="mills"&&h(ML,{title:"Yarn Mills (spinning mills)",mk:"yarnMills",ic:"🏭"}),
     tab==="suppliers"&&h(YarnSuppliersM,null),
     tab==="godowns"&&h(ML,{title:"Godowns / Mills",mk:"godowns",ic:"🏭"}),
