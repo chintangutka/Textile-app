@@ -2385,12 +2385,20 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     const status=calcPayStatus(totalRcvd,dispEntry.total);
     await dbUpdate(firm,"dispatch",dispEntry._id,{...dispEntry,payments:pmts,amountReceived:totalRcvd,paymentStatus:status});
     setPmtForm({date:today(),amount:"",note:""});
-    toast2("₹"+fmt(+pmtForm.amount)+" instalment recorded");
+    toast2("Instalment recorded");
+    // Sync instalments to Payment Ledger sheet + update firm sheet status
+    const gsSync={action:"syncInstalments",firm:FIRMS[firm].name,
+      challanNo:dispEntry.challanNo,customer:dispEntry.customer,designNo:dispEntry.designNo,
+      challanDate:dispEntry.date,billTotal:dispEntry.total,payments:pmts};
     try{
+      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(gsSync)})
+        .then(r=>r.json())
+        .then(r=>r.ok?toast2("Sheet: "+r.synced+" instalment"+(r.synced!==1?"s":"")+" in Payment Ledger"):toast2("Sheet: "+(r.error||"Error"),"err"))
+        .catch(()=>{});
       fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({action:"updatePayment",firm:FIRMS[firm].name,challanNo:dispEntry.challanNo,
           amountReceived:totalRcvd,paymentStatus:status,paymentReceived:totalRcvd})})
-        .then(r=>r.json()).then(r=>!r.ok&&toast2("⚠ Sheet sync failed","err")).catch(()=>{});
+        .then(r=>r.json()).catch(()=>{});
     }catch(e){}
   }
 
@@ -2401,8 +2409,19 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     const status=calcPayStatus(totalRcvd,dispEntry.total);
     await dbUpdate(firm,"dispatch",dispEntry._id,{...dispEntry,payments:pmts,amountReceived:totalRcvd,paymentStatus:status});
     toast2("Instalment removed");
+    // Re-sync remaining instalments to Payment Ledger
+    const gsSync={action:"syncInstalments",firm:FIRMS[firm].name,
+      challanNo:dispEntry.challanNo,customer:dispEntry.customer,designNo:dispEntry.designNo,
+      challanDate:dispEntry.date,billTotal:dispEntry.total,payments:pmts};
+    try{
+      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(gsSync)})
+        .then(r=>r.json()).catch(()=>{});
+      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"updatePayment",firm:FIRMS[firm].name,challanNo:dispEntry.challanNo,
+          amountReceived:totalRcvd,paymentStatus:status,paymentReceived:totalRcvd})})
+        .then(r=>r.json()).catch(()=>{});
+    }catch(e){}
   }
-
   async function pushAllToSheet(){
     if(!confirm("Push all "+disp.length+" entries to Google Sheet?"))return;
     setSyncing(true);toast2("Pushing all entries…");
@@ -2589,11 +2608,12 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
           ["Date","Challan","Customer","Design","Meters","Total ₹","Received ₹","Outstanding","Status","Instalments"],
           filt.map(r=>{const pmts=r.payments||[];const rcvd=+r.amountReceived||0;const out=Math.max(0,(+r.total||0)-rcvd);
             const instStr=pmts.length?pmts.map((p,pi)=>"#"+(pi+1)+": "+fmtD(p.date)+" Rs"+fmt(p.amount)+(p.note?" ("+p.note+")":"")).join(" | "):"—";
-            return[fmtD(r.date),r.challanNo||"—",r.customer,r.designNo,fmt(r.meters),"Rs"+fmt(r.total),"Rs"+fmt(rcvd),"Rs"+fmt(out),r.paymentStatus||"Pending",instStr];})
+            const cs=calcPayStatus(+r.amountReceived||0,+r.total||0);
+            return[fmtD(r.date),r.challanNo||"—",r.customer,r.designNo,fmt(r.meters),"Rs"+fmt(r.total),"Rs"+fmt(rcvd),"Rs"+fmt(out),cs,instStr];})
           )},"🖨 Print"),
         h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("dispatch",
           ["Date","Challan","Customer","Design","Meters","Total","Received","Outstanding","Status"],
-          filt.map(r=>[fmtD(r.date),r.challanNo||"",r.customer,r.designNo,r.meters,r.total,r.amountReceived||0,Math.max(0,(+r.total||0)-(+r.amountReceived||0)),r.paymentStatus||"Pending"]))},"⬇ Excel")
+          filt.map(r=>[fmtD(r.date),r.challanNo||"",r.customer,r.designNo,r.meters,r.total,r.amountReceived||0,Math.max(0,(+r.total||0)-(+r.amountReceived||0)),calcPayStatus(+r.amountReceived||0,+r.total||0)]))},"⬇ Excel")
       )),
       h("div",{className:"sbr"},
         h("input",{placeholder:"Search customer, design, challan...",value:srch,onChange:e=>setSrch(e.target.value)}),
@@ -2612,7 +2632,8 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
           const pmts=r.payments||[];
           const rcvd=+r.amountReceived||0;
           const outstanding=Math.max(0,(+r.total||0)-rcvd);
-          const pmt=r.paymentStatus||"Pending";
+          // Always compute from numbers — stored paymentStatus may be stale
+          const pmt=calcPayStatus(rcvd,+r.total||0);
           const isOpen=expandedPmt===r._id;
 
           const mainRow=h("tr",{key:"row-"+i,style:{background:isOpen?"#EEF2FF":""}},
