@@ -2292,48 +2292,39 @@ function PYarnLed({inw,M,fname}){
 
 // ── FABRIC DISPATCH / SALE ──
 // ── FABRIC DISPATCH / SALE ──
+// ── FABRIC DISPATCH / SALE ──
 function PDisp({firm,M,disp,fab,toast2,updM,fname}){
   const[editId,setEditId]=useState(null);
-  // amountReceived drives paymentStatus automatically
   const ini={date:today(),challanNo:"",customer:"",designNo:"",meters:"",taka:"",rate:"",
-    deliveryPlace:"",transporter:"",discountPct:"",lotNo:"",
-    amountReceived:"",paymentDate:"",remarks:""};
-
-  const startEdit=(r)=>{setEditId(r._id);sf({
-    date:r.date||today(),challanNo:r.challanNo||"",customer:r.customer||"",
+    deliveryPlace:"",transporter:"",discountPct:"",lotNo:"",remarks:""};
+  const startEdit=(r)=>{setEditId(r._id);sf({date:r.date||today(),challanNo:r.challanNo||"",customer:r.customer||"",
     designNo:r.designNo||"",meters:r.meters||"",taka:r.taka||"",rate:r.rate||"",
     deliveryPlace:r.deliveryPlace||"",transporter:r.transporter||"",
-    discountPct:r.discountPct||"",lotNo:r.lotNo||"",
-    amountReceived:r.amountReceived||"",paymentDate:r.paymentDate||"",remarks:r.remarks||""
-  })};
+    discountPct:r.discountPct||"",lotNo:r.lotNo||"",remarks:r.remarks||""})};
   const cancelEdit=()=>{setEditId(null);sf(ini)};
   const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
   const[srch,setSrch]=useState(""),[fc,setFc]=useState("");
   const[sheetInfo,setSheetInfo]=useState(null);
   const[sheetErr,setSheetErr]=useState(false);
   const[syncing,setSyncing]=useState(false);
+  const[expandedPmt,setExpandedPmt]=useState(null);
+  const[pmtForm,setPmtForm]=useState({date:today(),amount:"",note:""});
+  const pfSet=(k,v)=>setPmtForm(p=>({...p,[k]:v}));
+  const[impOpen,setImpOpen]=useState(false);
+  const[impRows,setImpRows]=useState([]);const[impCols,setImpCols]=useState([]);
+  const[colMap,setColMap]=useState({});const[impSel,setImpSel]=useState({});
+  const[importing,setImporting]=useState(false);
+  const impFileRef=React.useRef();
+  const DISP_FIELDS=[{k:"date",l:"Date"},{k:"challanNo",l:"Challan No."},{k:"customer",l:"Customer"},
+    {k:"designNo",l:"Design No."},{k:"meters",l:"Meters"},{k:"taka",l:"No. of Taka"},
+    {k:"rate",l:"Rate/m"},{k:"deliveryPlace",l:"Delivery Place"},{k:"transporter",l:"Transporter"},
+    {k:"discountPct",l:"Discount %"},{k:"remarks",l:"Remarks"}];
 
   useEffect(()=>{
     fetch(GS_URL).then(r=>r.json())
       .then(d=>{if(d.ok&&d.url)setSheetInfo(d);else setSheetErr(true);})
       .catch(()=>setSheetErr(true));
   },[]);
-
-  const[impOpen,setImpOpen]=useState(false);
-  const[impRows,setImpRows]=useState([]);
-  const[impCols,setImpCols]=useState([]);
-  const[colMap,setColMap]=useState({});
-  const[impSel,setImpSel]=useState({});
-  const[importing,setImporting]=useState(false);
-  const impFileRef=React.useRef();
-
-  const DISP_FIELDS=[
-    {k:"date",l:"Date"},{k:"challanNo",l:"Challan No."},{k:"customer",l:"Customer"},
-    {k:"designNo",l:"Design No."},{k:"meters",l:"Meters"},{k:"taka",l:"No. of Taka"},
-    {k:"rate",l:"Rate/m"},{k:"deliveryPlace",l:"Delivery Place"},
-    {k:"transporter",l:"Transporter"},{k:"discountPct",l:"Discount %"},
-    {k:"amountReceived",l:"Amount Received"},{k:"remarks",l:"Remarks"},
-  ];
 
   function onExcelFile(e){
     const file=e.target.files[0];if(!file)return;
@@ -2348,127 +2339,110 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         const rows=data.slice(1).filter(r=>r.some(c=>c!=""));
         setImpCols(headers);setImpRows(rows);
         const auto={};
-        const aliases={date:["date","dispatch date","dt"],challanNo:["challan","challan no","invoice no"],
-          customer:["customer","buyer","party","sold to"],designNo:["design","quality","article"],
-          meters:["meters","mtr","qty"],taka:["taka","rolls","pieces"],rate:["rate","price","rate per meter"],
-          deliveryPlace:["delivery","destination"],transporter:["transporter","carrier"],
-          discountPct:["discount","disc"],amountReceived:["amount received","paid","received"],remarks:["remarks","notes"]};
+        const aliases={date:["date","dispatch date"],challanNo:["challan","invoice no"],
+          customer:["customer","buyer","party"],designNo:["design","quality"],
+          meters:["meters","mtr"],taka:["taka","rolls"],rate:["rate","price"],
+          deliveryPlace:["delivery","destination"],transporter:["transporter"],
+          discountPct:["discount","disc"],remarks:["remarks","notes"]};
         DISP_FIELDS.forEach(({k})=>{
           const al=aliases[k]||[k];
           const idx=headers.findIndex(h=>al.some(a=>h.toLowerCase().includes(a)));
           if(idx>=0)auto[k]=String(idx);
         });
-        setColMap(auto);
-        const sel={};rows.forEach((_,i)=>{sel[i]=true;});setImpSel(sel);
-        setImpOpen(true);
-      }catch(err){toast2("Could not read Excel: "+err.message,"err");}
+        setColMap(auto);const sel={};rows.forEach((_,i)=>{sel[i]=true;});setImpSel(sel);setImpOpen(true);
+      }catch(err){toast2("Cannot read file: "+err.message,"err");}
     };
     reader.readAsBinaryString(file);e.target.value="";
   }
-
-  function cellVal(row,colIdx){
-    if(colIdx==null||colIdx==="")return "";
-    const v=row[+colIdx];
-    if(v instanceof Date)return v.toISOString().slice(0,10);
-    return String(v||"").trim();
-  }
-
+  function cellVal(row,ci){if(ci==null||ci==="")return "";const v=row[+ci];if(v instanceof Date)return v.toISOString().slice(0,10);return String(v||"").trim();}
   async function doImport(){
-    setImporting(true);
-    const selected=impRows.filter((_,i)=>impSel[i]);
-    let count=0;
-    for(const row of selected){
-      const get=k=>cellVal(row,colMap[k]);
-      const meters=+get("meters")||0;const rate=+get("rate")||0;
-      const taxable=meters*rate;const disc=taxable*(+get("discountPct")||0)/100;
-      const afterDisc=taxable-disc;const sgst=afterDisc*0.025;const cgst=afterDisc*0.025;
-      const total=afterDisc+sgst+cgst;const amtRcvd=+get("amountReceived")||0;
-      const pmtStatus=calcPayStatus(amtRcvd,total);
-      const rec={date:get("date")||today(),challanNo:get("challanNo"),customer:get("customer"),
-        designNo:get("designNo"),meters,taka:+get("taka")||0,rate,
-        deliveryPlace:get("deliveryPlace"),transporter:get("transporter"),
-        discountPct:+get("discountPct")||0,amountReceived:amtRcvd,paymentDate:"",
-        remarks:get("remarks"),taxable,discAmt:disc,afterDisc,sgst,cgst,total,
-        paymentStatus:pmtStatus,_imported:true};
+    setImporting(true);const sel=impRows.filter((_,i)=>impSel[i]);let n=0;
+    for(const row of sel){
+      const g=k=>cellVal(row,colMap[k]);
+      const m=+g("meters")||0,rate=+g("rate")||0,tax=m*rate,disc=tax*(+g("discountPct")||0)/100;
+      const aftD=tax-disc,sgst=aftD*0.025,cgst=aftD*0.025,total=aftD+sgst+cgst;
+      const rec={date:g("date")||today(),challanNo:g("challanNo"),customer:g("customer"),designNo:g("designNo"),
+        meters:m,taka:+g("taka")||0,rate,deliveryPlace:g("deliveryPlace"),transporter:g("transporter"),
+        discountPct:+g("discountPct")||0,lotNo:"",remarks:g("remarks"),taxable:tax,discAmt:disc,afterDisc:aftD,
+        sgst,cgst,total,payments:[],amountReceived:0,paymentStatus:"Pending"};
       if(!rec.customer&&!rec.meters)continue;
-      await dbs(firm,"dispatch",uid(),rec);count++;
+      await dbs(firm,"dispatch",uid(),rec);n++;
     }
-    setImporting(false);setImpOpen(false);setImpRows([]);setImpCols([]);setColMap({});
-    toast2(count+" dispatches imported!");
+    setImporting(false);setImpOpen(false);setImpRows([]);setImpCols([]);setColMap({});toast2(n+" dispatches imported!");
   }
 
-  // ── Push ALL existing Firestore entries → Google Sheet ──
-  async function pushAllToSheet(){
-    if(!confirm("Push all "+disp.length+" dispatch entries to Google Sheet? This will overwrite existing sheet data."))return;
-    setSyncing(true);toast2("Pushing all entries to Sheet…");
-    try{
-      const entries=disp.map(r=>({
-        action:"addEntry",firm:FIRMS[firm].name,
-        date:r.date||"",challanNo:r.challanNo||"",customer:r.customer||"",
-        designNo:r.designNo||"",meters:+r.meters||0,taka:+r.taka||0,rate:+r.rate||0,
-        deliveryPlace:r.deliveryPlace||"",transporter:r.transporter||"",lotNo:r.lotNo||"",
-        discountPct:+r.discountPct||0,taxable:+r.taxable||0,discAmt:+r.discAmt||0,
-        afterDisc:+r.afterDisc||0,sgst:+r.sgst||0,cgst:+r.cgst||0,total:+r.total||0,
-        amountReceived:+r.amountReceived||0,paymentStatus:r.paymentStatus||"Pending",
-        remarks:r.remarks||""
-      }));
-      const res=await fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({action:"pushAll",firm:FIRMS[firm].name,entries})});
-      const json=await res.json();
-      if(json.ok)toast2("✅ Pushed "+json.pushed+" entries to Google Sheet");
-      else toast2("⚠ Push failed: "+(json.error||"Error"),"err");
-    }catch(e){toast2("Push error: "+e.message,"err");}
-    setSyncing(false);
-  }
-  async function syncFromSheet(){
-    setSyncing(true);toast2("Pulling from Google Sheet…");
-    try{
-      const url=GS_URL+"?action=data&firm="+encodeURIComponent(FIRMS[firm].name);
-      const res=await fetch(url);const json=await res.json();
-      if(!json.ok){toast2("Sync failed: "+(json.error||"Error"),"err");setSyncing(false);return;}
-      const sheetEntries=json.entries||[];
-      let added=0,updated=0;
-      for(const se of sheetEntries){
-        if(!se.challan&&!se.meters)continue;
-        const existing=disp.find(d=>d.challanNo&&se.challan&&String(d.challanNo)===String(se.challan));
-        const mapped={
-          date:se.date?new Date(se.date).toISOString().slice(0,10):"",
-          challanNo:se.challan||"",customer:se.party||"",designNo:se.quality||"",
-          meters:+se.meters||0,taka:+se.taka||0,rate:+se.rate||0,
-          deliveryPlace:se.delivery||"",lotNo:se.lot||"",
-          discountPct:+se.disc||0,taxable:+se.taxable||0,discAmt:+se.discAmt||0,
-          afterDisc:+se.afterDisc||0,sgst:+se.sgst||0,cgst:+se.cgst||0,total:+se.total||0,
-          amountReceived:+se.amtRcvd||0,paymentStatus:se.payment||"Pending",remarks:se.remarks||""
-        };
-        if(existing){
-          if(existing.paymentStatus!==mapped.paymentStatus||existing.amountReceived!==mapped.amountReceived){
-            await dbUpdate(firm,"dispatch",existing._id,{...existing,...mapped});updated++;
-          }
-        } else {
-          await dbs(firm,"dispatch",uid(),mapped);added++;
-        }
-      }
-      toast2("Sheet sync done: "+added+" new, "+updated+" updated");
-    }catch(e){toast2("Sync error: "+e.message,"err");}
-    setSyncing(false);
-  }
-
-  // Auto-compute paymentStatus from amountReceived vs total
   function calcPayStatus(rcvd,tot){
     if(!rcvd||+rcvd<=0)return "Pending";
     if(+rcvd>=(+tot)*0.999&&+tot>0)return "Received";
     return "Partial";
   }
 
-  // Live calculations
+  async function addPayment(dispEntry){
+    if(!pmtForm.amount||+pmtForm.amount<=0){toast2("Enter a valid amount","err");return}
+    const newPmt={id:uid(),date:pmtForm.date||today(),amount:+pmtForm.amount,note:pmtForm.note||""};
+    const pmts=[...(dispEntry.payments||[]),newPmt];
+    const totalRcvd=pmts.reduce((a,p)=>a+(+p.amount||0),0);
+    const status=calcPayStatus(totalRcvd,dispEntry.total);
+    await dbUpdate(firm,"dispatch",dispEntry._id,{...dispEntry,payments:pmts,amountReceived:totalRcvd,paymentStatus:status});
+    setPmtForm({date:today(),amount:"",note:""});
+    toast2("₹"+fmt(+pmtForm.amount)+" instalment recorded");
+    try{
+      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"updatePayment",firm:FIRMS[firm].name,challanNo:dispEntry.challanNo,
+          amountReceived:totalRcvd,paymentStatus:status,paymentReceived:totalRcvd})})
+        .then(r=>r.json()).then(r=>!r.ok&&toast2("⚠ Sheet sync failed","err")).catch(()=>{});
+    }catch(e){}
+  }
+
+  async function deletePayment(dispEntry,pmtId){
+    if(!confirm("Remove this instalment?"))return;
+    const pmts=(dispEntry.payments||[]).filter(p=>p.id!==pmtId);
+    const totalRcvd=pmts.reduce((a,p)=>a+(+p.amount||0),0);
+    const status=calcPayStatus(totalRcvd,dispEntry.total);
+    await dbUpdate(firm,"dispatch",dispEntry._id,{...dispEntry,payments:pmts,amountReceived:totalRcvd,paymentStatus:status});
+    toast2("Instalment removed");
+  }
+
+  async function pushAllToSheet(){
+    if(!confirm("Push all "+disp.length+" entries to Google Sheet?"))return;
+    setSyncing(true);toast2("Pushing all entries…");
+    try{
+      const entries=disp.map(r=>({...r,firm:FIRMS[firm].name}));
+      const res=await fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"pushAll",firm:FIRMS[firm].name,entries})});
+      const j=await res.json();
+      if(j.ok)toast2("✅ Pushed "+j.pushed+" entries to Sheet");
+      else toast2("⚠ Push failed: "+(j.error||"Error"),"err");
+    }catch(e){toast2("Push error: "+e.message,"err");}
+    setSyncing(false);
+  }
+
+  async function syncFromSheet(){
+    setSyncing(true);toast2("Pulling from Sheet…");
+    try{
+      const res=await fetch(GS_URL+"?action=data&firm="+encodeURIComponent(FIRMS[firm].name));
+      const j=await res.json();
+      if(!j.ok){toast2("Sync failed","err");setSyncing(false);return;}
+      let added=0,updated=0;
+      for(const se of j.entries||[]){
+        if(!se.challan&&!se.meters)continue;
+        const existing=disp.find(d=>d.challanNo&&String(d.challanNo)===String(se.challan));
+        const mapped={date:se.date?new Date(se.date).toISOString().slice(0,10):"",challanNo:se.challan||"",
+          customer:se.party||"",designNo:se.quality||"",meters:+se.meters||0,taka:+se.taka||0,rate:+se.rate||0,
+          deliveryPlace:se.delivery||"",lotNo:se.lot||"",discountPct:+se.disc||0,taxable:+se.taxable||0,
+          discAmt:+se.discAmt||0,afterDisc:+se.afterDisc||0,sgst:+se.sgst||0,cgst:+se.cgst||0,total:+se.total||0,
+          amountReceived:+se.amtRcvd||0,paymentStatus:se.payment||"Pending",remarks:se.remarks||""};
+        if(existing){if(existing.paymentStatus!==mapped.paymentStatus){await dbUpdate(firm,"dispatch",existing._id,{...existing,...mapped});updated++;}}
+        else{await dbs(firm,"dispatch",uid(),{...mapped,payments:[]});added++;}
+      }
+      toast2("Sync done: "+added+" new, "+updated+" updated");
+    }catch(e){toast2("Sync error: "+e.message,"err");}
+    setSyncing(false);
+  }
+
   const taxable=(+f.meters||0)*(+f.rate||0);
   const discAmt=taxable*(+f.discountPct||0)/100;
   const afterDisc=taxable-discAmt;
   const sgst=afterDisc*0.025;const cgst=afterDisc*0.025;const total=afterDisc+sgst+cgst;
-  const amtRcvd=+f.amountReceived||0;
-  const outstanding=total>0?Math.max(0,total-amtRcvd):0;
-  const paymentStatus=calcPayStatus(amtRcvd,total);
-
   const availDesigns=[...new Set(fab.map(r=>r.designNo).filter(Boolean))];
   const filt=[...disp].reverse().filter(r=>{
     const q=srch.toLowerCase();
@@ -2476,108 +2450,97 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
   });
   const totalM=filt.reduce((a,r)=>a+(+r.meters||0),0);
   const totalAmt=filt.reduce((a,r)=>a+(+r.total||0),0);
-  const totalRcvd=filt.reduce((a,r)=>a+(+r.amountReceived||0),0);
-  const totalPending=totalAmt-totalRcvd;
+  const totalRcvdAll=filt.reduce((a,r)=>a+(+r.amountReceived||0),0);
+  const totalPendingAll=totalAmt-totalRcvdAll;
   const customers=[...new Set(disp.map(r=>r.customer).filter(Boolean))];
 
   async function saveDispatch(){
     if(!f.customer||!f.designNo||!f.meters||!f.rate){toast2("Fill required fields","err");return}
     const save={...f,meters:+f.meters,taka:+f.taka||0,rate:+f.rate,discountPct:+f.discountPct||0,
-      amountReceived:amtRcvd,taxable,discAmt,afterDisc,sgst,cgst,total,paymentStatus};
+      taxable,discAmt,afterDisc,sgst,cgst,total};
     const isEdit=!!editId;
-    if(isEdit){await dbUpdate(firm,"dispatch",editId,save);setEditId(null);}
-    else{await dbs(firm,"dispatch",uid(),save);}
+    if(isEdit){
+      const existing=disp.find(d=>d._id===editId);
+      if(existing){save.payments=existing.payments||[];save.amountReceived=existing.amountReceived||0;save.paymentStatus=existing.paymentStatus||"Pending";}
+      await dbUpdate(firm,"dispatch",editId,save);setEditId(null);
+    } else {
+      save.payments=[];save.amountReceived=0;save.paymentStatus="Pending";
+      await dbs(firm,"dispatch",uid(),save);
+    }
     sf(ini);toast2(isEdit?"Updated!":"Dispatch saved!");
-    // ── Sync to Google Sheet ──
     try{
-      const gsPayload={action:isEdit?"updateEntry":"addEntry",firm:FIRMS[firm].name,...save};
-      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(gsPayload)})
-        .then(r=>r.json())
-        .then(r=>r.ok?toast2("✅ "+(isEdit?"Updated":"Synced")+" in Google Sheet"):toast2("⚠ Sheet sync: "+(r.error||"Error"),"err"))
+      const gs={action:isEdit?"updateEntry":"addEntry",firm:FIRMS[firm].name,...save};
+      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(gs)})
+        .then(r=>r.json()).then(r=>r.ok?toast2("✅ "+(isEdit?"Updated":"Synced")+" in Sheet"):toast2("⚠ Sheet: "+(r.error||"?"),"err"))
         .catch(()=>toast2("⚠ Sheet sync failed","err"));
     }catch(e){}
   }
-
-  async function del(id,challanNo){
-    if(!confirm("Delete this dispatch entry?"))return;
-    await dbd(firm,"dispatch",id);
-  }
+  async function del(id){if(!confirm("Delete dispatch entry?"))return;await dbd(firm,"dispatch",id)}
 
   return h("div",null,
 
-    // ── Connected Sheet Banner + Import ──
+    // ── Sync bar ──
     h("div",{className:"card",style:{marginBottom:12}},
       h("div",{className:"chd"},
         h("div",{className:"ct"},"📥 Import & Sync"),
-        h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
-          h("button",{className:"btn btn-sm"+(syncing?" btn-p":""),onClick:syncFromSheet,disabled:syncing},syncing?"⏳ Syncing…":"🔄 Pull from Sheet"),
+        h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
+          h("button",{className:"btn btn-sm",onClick:syncFromSheet,disabled:syncing},syncing?"⏳":"🔄 Pull from Sheet"),
           h("button",{className:"btn btn-sm",style:{background:"#1565C0",color:"#fff"},onClick:pushAllToSheet,disabled:syncing},"⬆ Push all to Sheet"),
           h("a",{href:"https://1drv.ms/x/c/d88fff87125c45ba/IQBHbh44Es-5TaSA3xJ9dBXWAZzsreKVvcAwF5NgCR-hNWg",target:"_blank",className:"btn btn-sm"},"📎 OneDrive"),
           h("input",{type:"file",accept:".xlsx,.xls,.csv",ref:impFileRef,style:{display:"none"},onChange:onExcelFile}),
           h("button",{className:"btn btn-sm btn-p",onClick:()=>impFileRef.current.click()},"⬆ Upload Excel")
         )
       ),
-      // Sheet connection indicator
-      h("div",{style:{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderRadius:"var(--r)",
+      h("div",{style:{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",borderRadius:"var(--r)",fontSize:11,
           background:sheetInfo?"#E8F5E9":sheetErr?"#FFF3E0":"var(--bg)",
           border:"1px solid "+(sheetInfo?"#A5D6A7":sheetErr?"#FFCC80":"var(--bdl)"),marginBottom:impOpen?8:0}},
-        h("span",{style:{fontSize:14}},sheetInfo?"📊":sheetErr?"⚠":"⏳"),
-        h("div",{style:{flex:1,fontSize:11}},
-          sheetInfo
-            ?h("span",null,h("strong",{style:{color:"#2e7d32"}},"Connected: "),
-                h("a",{href:sheetInfo.url,target:"_blank",style:{color:"#1565c0",fontWeight:700}},sheetInfo.name),
-                h("span",{style:{color:"var(--mu)",marginLeft:6}},"— every save auto-syncs · use 🔄 to pull Sheet edits into app"))
-            :sheetErr?h("span",{style:{color:"#e65100"}},"Cannot reach Google Sheet — check URL or redeploy")
-            :h("span",{style:{color:"var(--mu)"}},"Checking connection…")
+        h("span",null,sheetInfo?"📊":sheetErr?"⚠":"⏳"),
+        h("div",{style:{flex:1}},
+          sheetInfo?h("span",null,h("strong",{style:{color:"#2e7d32"}},"Connected: "),
+            h("a",{href:sheetInfo.url,target:"_blank",style:{color:"#1565c0",fontWeight:700}},sheetInfo.name),
+            h("span",{style:{color:"var(--mu)",marginLeft:6}},"— saves auto-sync"))
+          :sheetErr?h("span",{style:{color:"#e65100"}},"Cannot reach Sheet — redeploy the Apps Script")
+          :h("span",{style:{color:"var(--mu)"}},"Checking…")
         ),
         sheetInfo&&h("a",{href:sheetInfo.url,target:"_blank",className:"btn btn-sm",style:{fontSize:11}},"Open ↗")
       ),
-      // Import panel
       impOpen&&h("div",null,
-        h("div",{style:{fontSize:12,fontWeight:600,marginBottom:6,color:"var(--in)"}},"Map Excel columns → dispatch fields:"),
+        h("div",{style:{fontSize:12,fontWeight:600,marginBottom:6,color:"var(--in)"}},"Map Excel columns:"),
         h("div",{style:{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}},
-          DISP_FIELDS.map(({k,l})=>h("div",{key:k,style:{display:"flex",alignItems:"center",gap:4,fontSize:11}},
-            h("label",{style:{minWidth:90,color:"var(--mu)"}},l),
+          DISP_FIELDS.map(({k,l})=>h("div",{key:k,style:{display:"flex",gap:4,fontSize:11,alignItems:"center"}},
+            h("label",{style:{minWidth:85,color:"var(--mu)"}},l),
             h("select",{value:colMap[k]||"",onChange:e=>setColMap(m=>({...m,[k]:e.target.value})),style:{height:26,fontSize:11}},
-              h("option",{value:""},"— skip —"),
-              impCols.map((c,i)=>h("option",{key:i,value:String(i)},c||"Col "+(i+1)))
-            )
+              h("option",{value:""},"—"),impCols.map((c,i)=>h("option",{key:i,value:String(i)},c||"Col "+(i+1))))
           ))
         ),
-        h("div",{style:{maxHeight:220,overflowY:"auto",border:"1px solid var(--bdl)",borderRadius:"var(--r)"}},
+        h("div",{style:{maxHeight:180,overflowY:"auto",border:"1px solid var(--bdl)",borderRadius:"var(--r)"}},
           h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11}},
-            h("thead",{style:{position:"sticky",top:0,background:"var(--bg)"}},
-              h("tr",null,
-                h("th",{style:{padding:"4px 6px",width:28}},h("input",{type:"checkbox",checked:Object.values(impSel).every(Boolean),onChange:e=>{const s={};impRows.forEach((_,i)=>{s[i]=e.target.checked;});setImpSel(s);}})),
-                DISP_FIELDS.filter(({k})=>colMap[k]!=null&&colMap[k]!=="").map(({k,l})=>h("th",{key:k,style:{padding:"4px 6px",textAlign:"left",fontWeight:600}},l))
-              )
-            ),
-            h("tbody",null,impRows.map((row,i)=>
-              h("tr",{key:i,style:{borderTop:"1px solid var(--bdl)",background:impSel[i]?"":"#F9F9F9"}},
-                h("td",{style:{padding:"4px 6px"}},h("input",{type:"checkbox",checked:!!impSel[i],onChange:e=>setImpSel(m=>({...m,[i]:e.target.checked}))})),
-                DISP_FIELDS.filter(({k})=>colMap[k]!=null&&colMap[k]!=="").map(({k})=>
-                  h("td",{key:k,style:{padding:"4px 6px",maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},cellVal(row,colMap[k]))
-                )
-              )
-            ))
+            h("thead",{style:{position:"sticky",top:0,background:"var(--bg)"}},h("tr",null,
+              h("th",{style:{padding:"4px 6px",width:28}},h("input",{type:"checkbox",checked:Object.values(impSel).every(Boolean),onChange:e=>{const s={};impRows.forEach((_,i)=>{s[i]=e.target.checked;});setImpSel(s);}})),
+              DISP_FIELDS.filter(({k})=>colMap[k]!=null&&colMap[k]!=="").map(({k,l})=>h("th",{key:k,style:{padding:"4px 6px",textAlign:"left",fontWeight:600}},l))
+            )),
+            h("tbody",null,impRows.map((row,i)=>h("tr",{key:i,style:{borderTop:"1px solid var(--bdl)"}},
+              h("td",{style:{padding:"4px 6px"}},h("input",{type:"checkbox",checked:!!impSel[i],onChange:e=>setImpSel(m=>({...m,[i]:e.target.checked}))})),
+              DISP_FIELDS.filter(({k})=>colMap[k]!=null&&colMap[k]!=="").map(({k})=>h("td",{key:k,style:{padding:"4px 6px",maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},cellVal(row,colMap[k])))
+            )))
           )
         ),
         h("div",{style:{display:"flex",gap:8,marginTop:6,alignItems:"center"}},
-          h("span",{style:{fontSize:11,color:"var(--mu)"}},Object.values(impSel).filter(Boolean).length+" of "+impRows.length+" rows selected"),
-          h("button",{className:"btn btn-p",onClick:doImport,disabled:importing},importing?"Importing…":"⬆ Import selected"),
+          h("span",{style:{fontSize:11,color:"var(--mu)"}},Object.values(impSel).filter(Boolean).length+" of "+impRows.length+" rows"),
+          h("button",{className:"btn btn-p",onClick:doImport,disabled:importing},importing?"Importing…":"⬆ Import"),
           h("button",{className:"btn",onClick:()=>{setImpOpen(false);setImpRows([]);}},"Cancel")
         )
       )
     ),
 
-    // ── New / Edit Dispatch Form ──
+    // ── Entry form ──
     h("div",{className:"card"},
       editId&&h("div",{className:"edit-bar"},"✏️ Editing — ",h("button",{className:"btn btn-sm",style:{marginLeft:"auto"},onClick:cancelEdit},"Cancel")),
       h("div",{className:"chd"},h("div",{className:"ct"},editId?"Update dispatch":"New fabric dispatch"),
         h("div",{style:{display:"flex",gap:6}},
-          h("span",{className:"bdg ba"},fmt(totalM)+" m total"),
+          h("span",{className:"bdg ba"},fmt(totalM)+" m"),
           totalAmt>0&&h("span",{className:"bdg bo"},"₹"+fmt(totalAmt)),
-          totalPending>0&&h("span",{className:"bdg be"},"₹"+fmt(totalPending)+" pending")
+          totalPendingAll>0.01&&h("span",{className:"bdg be"},"₹"+fmt(totalPendingAll)+" pending")
         )
       ),
       h("div",{className:"fr c2"},
@@ -2589,115 +2552,163 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         FL("Design No. *",h(AddSel,{val:f.designNo,fn:v=>s("designNo",v),opts:availDesigns,placeholder:"Select design..."}))
       ),
       h("div",{className:"fr c2"},
-        FL("Delivery Place",h("input",{value:f.deliveryPlace,onChange:e=>s("deliveryPlace",e.target.value),placeholder:"City / address"})),
+        FL("Delivery Place",h("input",{value:f.deliveryPlace,onChange:e=>s("deliveryPlace",e.target.value)})),
         FL("Transporter",h("input",{value:f.transporter,onChange:e=>s("transporter",e.target.value)}))
       ),
       h("div",{className:"fr c3"},
         FL("Meters *",h("input",{type:"number",value:f.meters,onChange:e=>s("meters",e.target.value)})),
-        FL("No. of Taka",h("input",{type:"number",value:f.taka,onChange:e=>s("taka",e.target.value),placeholder:"Rolls"})),
+        FL("No. of Taka",h("input",{type:"number",value:f.taka,onChange:e=>s("taka",e.target.value)})),
         FL("Rate / meter (₹) *",h("input",{type:"number",value:f.rate,onChange:e=>s("rate",e.target.value)}))
       ),
       h("div",{className:"fr c2"},
-        FL("Lot No.",h("input",{value:f.lotNo||"",onChange:e=>s("lotNo",e.target.value),placeholder:"Lot / batch"})),
+        FL("Lot No.",h("input",{value:f.lotNo||"",onChange:e=>s("lotNo",e.target.value)})),
         FL("Discount %",h("input",{type:"number",value:f.discountPct,onChange:e=>s("discountPct",e.target.value),placeholder:"0"}))
       ),
-
-      // Live invoice calculation
       taxable>0&&h("div",{style:{background:"var(--bg)",border:"1px solid var(--bdl)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:10}},
-        h("div",{style:{fontSize:11,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}},"Invoice calculation"),
-        h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},
-          h("tbody",null,
-            [["Taxable amount",taxable],f.discountPct&&["Discount ("+f.discountPct+"%)",-discAmt],
-             f.discountPct&&["After discount",afterDisc],["SGST @ 2.5%",sgst],["CGST @ 2.5%",cgst]]
-            .filter(Boolean).map(([l,v],i)=>h("tr",{key:i,style:{borderBottom:"1px solid var(--bdl)"}},
-              h("td",{style:{padding:"4px 0",color:"var(--mu)"}},l),
-              h("td",{style:{padding:"4px 0",textAlign:"right",fontFamily:"DM Mono,monospace",color:v<0?"var(--er)":"var(--tx)"}},(v<0?"−₹":"₹")+fmt(Math.abs(v)))
-            )),
-            h("tr",{style:{borderTop:"2px solid var(--bdl)"}},
-              h("td",{style:{padding:"6px 0",fontWeight:700,fontSize:13}},"Total Amount"),
-              h("td",{style:{padding:"6px 0",textAlign:"right",fontWeight:700,fontSize:15,color:"var(--ok)",fontFamily:"DM Mono,monospace"}},"₹"+fmt(total))
-            )
-          )
-        )
+        h("div",{style:{fontSize:11,fontWeight:600,color:"var(--mu)",textTransform:"uppercase",marginBottom:8}},"Invoice calculation"),
+        h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},h("tbody",null,
+          [["Taxable",taxable],f.discountPct&&["Discount ("+f.discountPct+"%)",-discAmt],
+           f.discountPct&&["After discount",afterDisc],["SGST 2.5%",sgst],["CGST 2.5%",cgst]]
+          .filter(Boolean).map(([l,v],i)=>h("tr",{key:i,style:{borderBottom:"1px solid var(--bdl)"}},
+            h("td",{style:{padding:"4px 0",color:"var(--mu)"}},l),
+            h("td",{style:{padding:"4px 0",textAlign:"right",fontFamily:"DM Mono,monospace",color:v<0?"var(--er)":"var(--tx)"}},(v<0?"−₹":"₹")+fmt(Math.abs(v))))),
+          h("tr",{style:{borderTop:"2px solid var(--bdl)"}},
+            h("td",{style:{padding:"6px 0",fontWeight:700}},"Total Amount"),
+            h("td",{style:{padding:"6px 0",textAlign:"right",fontWeight:700,fontSize:15,color:"var(--ok)",fontFamily:"DM Mono,monospace"}},"₹"+fmt(total)))
+        ))
       ),
-
-      // Payment received
-      h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"10px 12px",marginBottom:10}},
-        h("div",{style:{fontSize:11,fontWeight:600,color:"var(--in)",marginBottom:8}},"💳 Payment received"),
-        h("div",{className:"fr c2"},
-          FL("Amount received (₹)",h("input",{type:"number",value:f.amountReceived,onChange:e=>s("amountReceived",e.target.value),placeholder:"0"})),
-          FL("Payment date",h("input",{type:"date",value:f.paymentDate||"",onChange:e=>s("paymentDate",e.target.value)}))
-        ),
-        total>0&&h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",marginTop:6,alignItems:"center"}},
-          h("span",{className:"bdg "+(paymentStatus==="Received"?"bo":paymentStatus==="Partial"?"bw":"be"),style:{fontSize:11}},
-            paymentStatus==="Received"?"✅ Fully Received":paymentStatus==="Partial"?"🔵 Partial — ₹"+fmt(outstanding)+" outstanding":"⏳ Pending — ₹"+fmt(total)+" due"
-          ),
-          h("span",{style:{fontSize:11,color:"var(--mu)"}},"Auto-calculated from amount received vs total")
-        )
-      ),
-
       FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value),style:{marginBottom:8}})),
-      h("button",{className:"btn btn-p btn-full",onClick:saveDispatch},
-        editId?"✅ Update & Sync to Google Sheet":"💾 Save & Sync to Google Sheet")
+      h("div",{style:{fontSize:11,color:"var(--mu)",marginBottom:8,padding:"6px 10px",background:"var(--inb)",borderRadius:"var(--r)"}},"💳 Record payment instalments after saving — click the 💰 button on any dispatch row below."),
+      h("button",{className:"btn btn-p btn-full",onClick:saveDispatch},editId?"✅ Update & Sync to Sheet":"💾 Save & Sync to Sheet")
     ),
 
     // ── Register ──
     h("div",{className:"card"},
       h("div",{className:"chd"},h("div",{className:"ct"},"Dispatch Register ("+disp.length+")"),h("div",{className:"bgrp"},
         h("button",{className:"btn btn-sm btn-pr no-print",onClick:()=>prnt(fname,"Fabric Dispatch",
-          ["Date","Challan","Customer","Design","Taka","Meters","Rate","Taxable","Disc%","SGST","CGST","Total","Rcvd","Outstanding","Status","Delivery"],
-          filt.map(r=>[fmtD(r.date),r.challanNo||"—",r.customer,r.designNo,r.taka||"—",
-            fmt(r.meters),r.rate,"₹"+fmt(r.taxable),r.discountPct||0,
-            "₹"+fmt(r.sgst),"₹"+fmt(r.cgst),"₹"+fmt(r.total),
-            "₹"+fmt(r.amountReceived||0),"₹"+fmt(Math.max(0,(+r.total||0)-(+r.amountReceived||0))),
-            r.paymentStatus||"Pending",r.deliveryPlace||"—"]))},"🖨 Print"),
+          ["Date","Challan","Customer","Design","Meters","Total ₹","Received ₹","Outstanding","Status","Instalments"],
+          filt.map(r=>{const pmts=r.payments||[];const rcvd=+r.amountReceived||0;const out=Math.max(0,(+r.total||0)-rcvd);
+            const instStr=pmts.length?pmts.map((p,pi)=>"#"+(pi+1)+": "+fmtD(p.date)+" Rs"+fmt(p.amount)+(p.note?" ("+p.note+")":"")).join(" | "):"—";
+            return[fmtD(r.date),r.challanNo||"—",r.customer,r.designNo,fmt(r.meters),"Rs"+fmt(r.total),"Rs"+fmt(rcvd),"Rs"+fmt(out),r.paymentStatus||"Pending",instStr];})
+          )},"🖨 Print"),
         h("button",{className:"btn btn-sm btn-xl no-print",onClick:()=>csvDL("dispatch",
-          ["Date","Challan","Customer","Design","Taka","Meters","Rate","Taxable","Disc%","SGST","CGST","Total","Rcvd","Outstanding","Status","Delivery"],
-          filt.map(r=>[fmtD(r.date),r.challanNo||"",r.customer,r.designNo,r.taka||"",r.meters,r.rate,
-            r.taxable,r.discountPct||0,r.sgst,r.cgst,r.total,
-            r.amountReceived||0,Math.max(0,(+r.total||0)-(+r.amountReceived||0)),
-            r.paymentStatus||"Pending",r.deliveryPlace||""]))},"⬇ Excel")
+          ["Date","Challan","Customer","Design","Meters","Total","Received","Outstanding","Status"],
+          filt.map(r=>[fmtD(r.date),r.challanNo||"",r.customer,r.designNo,r.meters,r.total,r.amountReceived||0,Math.max(0,(+r.total||0)-(+r.amountReceived||0)),r.paymentStatus||"Pending"]))},"⬇ Excel")
       )),
       h("div",{className:"sbr"},
         h("input",{placeholder:"Search customer, design, challan...",value:srch,onChange:e=>setSrch(e.target.value)}),
         h("select",{value:fc,onChange:e=>setFc(e.target.value),style:{height:34}},h("option",{value:""},"All customers"),customers.map(c=>h("option",{key:c,value:c},c)))
       ),
-      // Summary totals
       filt.length>0&&h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}},
         h("span",{className:"bdg ba mn"},fmt(totalM)+" m"),
-        h("span",{className:"bdg bo mn"},"₹"+fmt(totalAmt)+" total"),
-        h("span",{className:"bdg bo mn",style:{background:"#E8F5E9",color:"#1B5E20"}},"₹"+fmt(totalRcvd)+" received"),
-        totalPending>0&&h("span",{className:"bdg be mn"},"₹"+fmt(totalPending)+" pending")
+        h("span",{className:"bdg bo mn"},"₹"+fmt(totalAmt)),
+        h("span",{className:"bdg",style:{background:"#E8F5E9",color:"#1B5E20",fontSize:10}},"₹"+fmt(totalRcvdAll)+" received"),
+        totalPendingAll>0.01&&h("span",{className:"bdg be mn"},"₹"+fmt(totalPendingAll)+" pending")
       ),
       filt.length===0?Em("No dispatches yet."):
       h("div",{className:"tw"},h("table",null,
-        h("thead",null,h("tr",null,TH(["Date","Challan","Customer","Design","Meters","Total ₹","Received ₹","Outstanding ₹","Status","Delivery",""]))),
-        h("tbody",null,filt.map((r,i)=>{
-          const outstanding=Math.max(0,(+r.total||0)-(+r.amountReceived||0));
+        h("thead",null,h("tr",null,TH(["Date","Challan","Customer","Design","Meters","Total ₹","Received","Outstanding","Status",""]))),
+        h("tbody",null,filt.flatMap((r,i)=>{
+          const pmts=r.payments||[];
+          const rcvd=+r.amountReceived||0;
+          const outstanding=Math.max(0,(+r.total||0)-rcvd);
           const pmt=r.paymentStatus||"Pending";
-          return h("tr",{key:i},
+          const isOpen=expandedPmt===r._id;
+
+          const mainRow=h("tr",{key:"row-"+i,style:{background:isOpen?"#EEF2FF":""}},
             Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(r.date))),
             Td(r.challanNo||"—","mn"),
             h("td",null,h("span",{style:{fontWeight:600}},r.customer)),
             Td(h("span",{className:"bdg bi"},r.designNo)),
-            Td(h("span",{className:"mn fw5"},fmt(r.meters)+" m")),
+            Td(h("span",{className:"mn"},fmt(r.meters)+" m")),
             Td(h("span",{className:"mn fw5"},"₹"+fmt(r.total||0))),
-            Td(h("span",{className:"mn",style:{color:"#1B5E20"}},"₹"+fmt(r.amountReceived||0))),
-            Td(outstanding>0?h("span",{className:"mn",style:{color:"var(--er)"}},"₹"+fmt(outstanding)):h("span",{style:{color:"var(--ok)",fontSize:11}},"—")),
+            h("td",null,
+              h("div",{style:{color:"#1B5E20",fontFamily:"DM Mono,monospace",fontSize:12,fontWeight:500}},"₹"+fmt(rcvd)),
+              pmts.length>0&&h("div",{style:{fontSize:9,color:"var(--mu)"}},"↳ "+pmts.length+" instalment"+(pmts.length>1?"s":""))
+            ),
+            Td(outstanding>0.01?h("span",{className:"mn",style:{color:"var(--er)"}},"₹"+fmt(outstanding)):h("span",{style:{color:"var(--ok)",fontSize:11}},"✓ Nil")),
             h("td",null,h("span",{className:"bdg "+(pmt==="Received"?"bo":pmt==="Partial"?"bw":"be"),style:{fontSize:10}},
-              pmt==="Received"?"✅ Received":pmt==="Partial"?"🔵 Partial":"⏳ Pending"
+              pmt==="Received"?"✅ Paid":pmt==="Partial"?"🔵 Partial":"⏳ Pending"
             )),
-            Td(r.deliveryPlace||"—","mn tm"),
-            h("td",null,h("div",{style:{display:"flex",gap:4}},
+            h("td",null,h("div",{style:{display:"flex",gap:3}},
+              h("button",{className:"btn btn-sm",style:{background:isOpen?"#283593":"#3949AB",color:"#fff",fontSize:10,minWidth:42},
+                onClick:()=>{setExpandedPmt(isOpen?null:r._id);setPmtForm({date:today(),amount:"",note:""});}},"💰 "+(pmts.length||0)),
               h("button",{className:"btn btn-sm btn-edit no-print",onClick:()=>startEdit(r)},"Edit"),
-              h("button",{className:"btn btn-sm btn-del no-print",onClick:()=>del(r._id,r.challanNo)},"Del")
+              h("button",{className:"btn btn-sm btn-del no-print",onClick:()=>del(r._id)},"Del")
             ))
           );
+
+          if(!isOpen)return[mainRow];
+
+          const run={v:0};
+          const pmtPanel=h("tr",{key:"pmt-"+i},
+            h("td",{colSpan:10,style:{padding:0}},
+              h("div",{style:{background:"#EEF2FF",border:"2px solid #3949AB",borderTop:"none",borderRadius:"0 0 var(--r) var(--r)",padding:"12px 16px"}},
+                // Panel header
+                h("div",{style:{display:"flex",alignItems:"center",gap:10,marginBottom:10}},
+                  h("div",{style:{flex:1}},
+                    h("div",{style:{fontWeight:700,fontSize:13,color:"#283593"}},"💳 Payment instalments — "+r.customer+" | Challan: "+(r.challanNo||"—")),
+                    h("div",{style:{fontSize:11,color:"var(--mu)",marginTop:2}},
+                      "Bill total: ₹"+fmt(r.total||0)+"   Received: ₹"+fmt(rcvd)+"   Outstanding: ₹"+fmt(outstanding))
+                  ),
+                  outstanding<0.01&&h("span",{className:"bdg bo",style:{fontSize:12}},"🎉 FULLY PAID"),
+                  h("button",{className:"btn btn-sm",onClick:()=>setExpandedPmt(null)},"✕ Close")
+                ),
+                // Instalments table
+                pmts.length===0
+                  ?h("div",{style:{color:"var(--mu)",fontSize:12,padding:"8px",background:"#fff",borderRadius:"var(--r)",border:"1px dashed var(--bdl)",marginBottom:10}},"No instalments yet. Add the first payment below.")
+                  :h("div",{className:"tw",style:{marginBottom:10,borderRadius:"var(--r)",overflow:"hidden"}},h("table",null,
+                    h("thead",null,h("tr",null,TH(["#","Date","Amount","Note","Running total","Balance",""]))),
+                    h("tbody",null,pmts.map((p,pi)=>{
+                      run.v+=(+p.amount||0);
+                      const bal=Math.max(0,(+r.total||0)-run.v);
+                      return h("tr",{key:p.id||pi,style:{background:pi%2===0?"#fff":"#F5F5F5"}},
+                        h("td",{style:{padding:"6px 10px",color:"var(--mu)",fontSize:11,fontWeight:600}},"#"+(pi+1)),
+                        Td(h("span",{className:"mn tm",style:{fontSize:11}},fmtD(p.date))),
+                        h("td",{style:{padding:"6px 10px"}},h("span",{style:{fontFamily:"DM Mono,monospace",fontWeight:600,color:"#1B5E20"}},"₹"+fmt(p.amount))),
+                        Td(p.note||"—","mn tm"),
+                        h("td",{style:{padding:"6px 10px"}},h("span",{className:"mn",style:{color:run.v>=(+r.total||0)*0.999?"var(--ok)":"#1565C0"}},"₹"+fmt(run.v))),
+                        h("td",{style:{padding:"6px 10px"}},
+                          bal<0.01?h("span",{style:{color:"var(--ok)",fontSize:11,fontWeight:600}},"✅ Nil")
+                          :h("span",{className:"mn",style:{color:"var(--er)"}},"₹"+fmt(bal))
+                        ),
+                        h("td",{style:{padding:"6px 10px"}},h("button",{className:"btn btn-sm btn-del",style:{fontSize:10},onClick:()=>deletePayment(r,p.id)},"Del"))
+                      );
+                    }))
+                  )),
+                // Add instalment form
+                outstanding>0.01&&h("div",{style:{background:"#fff",border:"1px solid #9FA8DA",borderRadius:"var(--r)",padding:"10px 12px"}},
+                  h("div",{style:{fontSize:11,fontWeight:700,color:"#283593",marginBottom:8}},"➕ Add payment instalment"),
+                  h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}},
+                    h("div",null,
+                      h("label",{style:{fontSize:11,color:"var(--mu)"}},"Date"),
+                      h("input",{type:"date",value:pmtForm.date,onChange:e=>pfSet("date",e.target.value),style:{height:30,fontSize:12}})
+                    ),
+                    h("div",null,
+                      h("label",{style:{fontSize:11,color:"var(--mu)"}},"Amount (₹) *"),
+                      h("input",{type:"number",value:pmtForm.amount,onChange:e=>pfSet("amount",e.target.value),
+                        placeholder:"₹ Enter amount",style:{height:30,fontSize:12,width:160}})
+                    ),
+                    h("div",null,
+                      h("label",{style:{fontSize:11,color:"var(--mu)"}},"Note (optional)"),
+                      h("input",{value:pmtForm.note,onChange:e=>pfSet("note",e.target.value),
+                        placeholder:"UPI / NEFT / Cheque / Cash…",style:{height:30,fontSize:12,width:190}})
+                    ),
+                    h("button",{className:"btn btn-p",style:{height:32,alignSelf:"flex-end"},onClick:()=>addPayment(r)},
+                      "✓ Add ₹"+(pmtForm.amount?fmt(+pmtForm.amount):"—")),
+                    h("div",{style:{marginLeft:"auto",alignSelf:"center",fontSize:12,fontWeight:600,color:"var(--er)"}},"₹"+fmt(outstanding)+" remaining")
+                  )
+                )
+              )
+            )
+          );
+          return[mainRow,pmtPanel];
         }))
       ))
     )
   );
 }
+
 
 function PHist({firm,delInw,delIss,delBms,delTrf,delFab,toast2}){
   const COLS={inward:"Yarn Inward",issues:"Issue Yarn",beams:"Beam Register",transfers:"Yarn Transfer",fabric:"Fabric Received"};
