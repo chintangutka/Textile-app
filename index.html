@@ -178,6 +178,7 @@ const today=()=>new Date().toISOString().split("T")[0];
 const fmt=n=>Number(n||0).toLocaleString("en-IN");
 const fmtD=d=>{if(!d)return"";const[y,m,da]=d.split("-");return da+"-"+"Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec".split(",")[+m-1]+"-"+y};
 const daysAgo=d=>{if(!d)return 0;return Math.floor((Date.now()-new Date(d))/(864e5))};
+const GS_URL="https://script.google.com/macros/s/AKfycbzmRk4uIl4NhU92jISXG2TMncVtCITtsdHwN5_ML7sDO088QkRqZ7sLxK4awXHYmJRo/exec";
 const FIRMS={r:{id:"r",name:"Rajesh Textiles"},s:{id:"s",name:"SN Textiles"}};
 
 function csvDL(name,hdr,rows){
@@ -2292,30 +2293,11 @@ function PYarnLed({inw,M,fname}){
 // ── FABRIC DISPATCH / SALE ──
 function PDisp({firm,M,disp,fab,toast2,updM,fname}){
   const[editId,setEditId]=useState(null);
-  const ini={date:today(),challanNo:"",customer:"",designNo:"",meters:"",taka:"",rate:"",deliveryPlace:"",transporter:"",discountPct:"",remarks:""};
-  const startEdit=(r)=>{setEditId(r._id);sf({date:r.date||today(),challanNo:r.challanNo||"",customer:r.customer||"",designNo:r.designNo||"",meters:r.meters||"",taka:r.taka||"",rate:r.rate||"",deliveryPlace:r.deliveryPlace||"",transporter:r.transporter||"",discountPct:r.discountPct||"",remarks:r.remarks||""})};
+  const ini={date:today(),challanNo:"",customer:"",designNo:"",meters:"",taka:"",rate:"",deliveryPlace:"",transporter:"",discountPct:"",lotNo:"",paymentStatus:"Pending",remarks:""};
+  const startEdit=(r)=>{setEditId(r._id);sf({date:r.date||today(),challanNo:r.challanNo||"",customer:r.customer||"",designNo:r.designNo||"",meters:r.meters||"",taka:r.taka||"",rate:r.rate||"",deliveryPlace:r.deliveryPlace||"",transporter:r.transporter||"",discountPct:r.discountPct||"",lotNo:r.lotNo||"",paymentStatus:r.paymentStatus||"Pending",remarks:r.remarks||""})};
   const cancelEdit=()=>{setEditId(null);sf(ini)};
   const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
   const[srch,setSrch]=useState(""),[fc,setFc]=useState("");
-
-  // ── Google Sheets sync ──
-  const GS_KEY="tsm_gs_url_"+firm;
-  const DEFAULT_GS_URL="https://script.google.com/macros/s/AKfycbyFZuKcgMGEkA6GHv8BV3VhMd2vpG4RPmEb9bb5ZnWuS8i4WWCf0jT9FVYt1z0kAoXjcA/exec";
-  const[gsUrl,setGsUrl]=useState(()=>localStorage.getItem(GS_KEY)||DEFAULT_GS_URL);
-  const[gsUrlInput,setGsUrlInput]=useState(()=>localStorage.getItem(GS_KEY)||DEFAULT_GS_URL);
-  const[gsOpen,setGsOpen]=useState(false);
-  const[gsSyncing,setGsSyncing]=useState(false);
-  const saveGsUrl=()=>{const v=gsUrlInput.trim();localStorage.setItem(GS_KEY,v);setGsUrl(v);setGsOpen(false);toast2(v?"Google Sheets URL saved! ✓":"Google Sheets disconnected","ok");};
-  async function syncToSheets(rec){
-    if(!gsUrl)return;
-    try{
-      setGsSyncing(true);
-      const row=[rec.date,rec.challanNo||"",rec.customer,rec.designNo,rec.taka||"",rec.meters,rec.rate,rec.taxable,rec.discountPct||0,rec.afterDisc,rec.sgst,rec.cgst,rec.total,rec.deliveryPlace||"",rec.transporter||"",rec.remarks||"",fname,new Date().toLocaleString("en-IN")];
-      await fetch(gsUrl,{method:"POST",body:JSON.stringify({action:"append",row}),headers:{"Content-Type":"application/json"}});
-      toast2("✓ Saved to Google Sheets!","ok");
-    }catch(e){toast2("Firestore saved. Sheets sync failed: "+e.message,"err");}
-    finally{setGsSyncing(false);}
-  }
 
   // ── Excel Import state ──
   const[impOpen,setImpOpen]=useState(false);
@@ -2431,63 +2413,6 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
 
   return h("div",null,
 
-    // ── GOOGLE SHEETS SYNC PANEL ──
-    h("div",{className:"card",style:{marginBottom:12,border:gsUrl?"1px solid #B8E5CB":"1px solid var(--bd)",background:gsUrl?"#F0FBF5":"var(--wh)"}},
-      h("div",{className:"chd"},
-        h("div",{style:{display:"flex",alignItems:"center",gap:8}},
-          h("span",{style:{fontSize:16}},"📊"),
-          h("div",null,
-            h("div",{className:"ct",style:{marginBottom:0}},"Google Sheets Sync"),
-            h("div",{style:{fontSize:11,color:gsUrl?"var(--ok)":"var(--mu)",marginTop:2}},
-              gsUrl?"✅ Connected — dispatches auto-sync to your sheet":"Not connected — set up to auto-sync dispatches"
-            )
-          )
-        ),
-        h("button",{className:"btn btn-sm "+(gsUrl?"btn-xl":"btn-p"),onClick:()=>{setGsUrlInput(gsUrl);setGsOpen(v=>!v)}},gsOpen?"✕ Close":(gsUrl?"⚙ Settings":"+ Connect"))
-      ),
-      gsOpen&&h("div",{style:{marginTop:10}},
-        h("div",{style:{background:"var(--inb)",border:"1px solid #BDD8ED",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:12,fontSize:12,color:"var(--in)",lineHeight:1.8}},
-          h("strong",null,"Setup steps:"),h("br",null),
-          "1. Open Google Sheets and go to ",h("strong",null,"Extensions → Apps Script"),h("br",null),
-          "2. Replace all code with the script below and click ",h("strong",null,"Deploy → New deployment"),h("br",null),
-          "3. Set type = ",h("strong",null,"Web app"),", execute as = ",h("strong",null,"Me"),", access = ",h("strong",null,"Anyone"),h("br",null),
-          "4. Copy the Web App URL and paste it below"
-        ),
-        h("div",{style:{background:"#1e1e1e",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:12,fontFamily:"DM Mono,monospace",fontSize:11,color:"#d4d4d4",overflowX:"auto",whiteSpace:"pre"}},
-`function doPost(e) {
-  var data = JSON.parse(e.postData.contents);
-  if (data.action !== 'append') return ok();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName('Dispatch') || ss.insertSheet('Dispatch');
-  if (sh.getLastRow() === 0) {
-    sh.appendRow(['Date','Challan No','Customer','Design No',
-      'Taka','Meters','Rate/m','Taxable','Disc%',
-      'After Disc','SGST','CGST','Total','Delivery Place',
-      'Transporter','Remarks','Firm','Synced At']);
-  }
-  sh.appendRow(data.row);
-  return ContentService.createTextOutput(
-    JSON.stringify({status:'ok'})
-  ).setMimeType(ContentService.MimeType.JSON);
-}
-function ok() {
-  return ContentService.createTextOutput(
-    JSON.stringify({status:'ok'})
-  ).setMimeType(ContentService.MimeType.JSON);
-}`
-        ),
-        h("div",{className:"fld",style:{marginBottom:8}},
-          h("label",null,"Apps Script Web App URL"),
-          h("input",{value:gsUrlInput,onChange:e=>setGsUrlInput(e.target.value),placeholder:"https://script.google.com/macros/s/.../exec",style:{fontFamily:"DM Mono,monospace",fontSize:12}})
-        ),
-        h("div",{style:{display:"flex",gap:8}},
-          h("button",{className:"btn btn-p",onClick:saveGsUrl},"Save URL"),
-          gsUrl&&h("button",{className:"btn btn-del",onClick:()=>{setGsUrlInput("");setGsUrl("");localStorage.removeItem(GS_KEY);setGsOpen(false);toast2("Disconnected","ok")}},"Disconnect"),
-          h("button",{className:"btn",onClick:()=>setGsOpen(false)},"Cancel")
-        )
-      )
-    ),
-
     // ── EXCEL IMPORT PANEL ──
     h("div",{className:"card",style:{marginBottom:12}},
       h("div",{className:"chd"},
@@ -2596,13 +2521,32 @@ function ok() {
           )
         )
       ),
+      h("div",{className:"fr c2"},
+        FL("Lot No.",h("input",{value:f.lotNo||"",onChange:e=>s("lotNo",e.target.value),placeholder:"Lot / batch number"})),
+        FL("Payment Status",h("select",{value:f.paymentStatus||"Pending",onChange:e=>s("paymentStatus",e.target.value),style:{height:32,fontSize:13}},
+          h("option",{value:"Pending"},"⏳ Pending"),
+          h("option",{value:"Received"},"✅ Received"),
+          h("option",{value:"Partial"},"🔵 Partial")
+        ))
+      ),
       FL("Remarks",h("input",{value:f.remarks,onChange:e=>s("remarks",e.target.value),style:{marginBottom:8}})),
-      h("button",{className:"btn btn-p btn-full",disabled:gsSyncing,onClick:async()=>{
+      h("button",{className:"btn btn-p btn-full",onClick:async()=>{
         if(!f.customer||!f.designNo||!f.meters||!f.rate){toast2("Fill required fields","err");return}
         const save={...f,meters:+f.meters,taka:+f.taka||0,rate:+f.rate,discountPct:+f.discountPct||0,taxable,discAmt,afterDisc,sgst,cgst,total};
-        if(editId){await dbUpdate(firm,"dispatch",editId,save);setEditId(null);toast2("Updated!");}
-        else{await dbs(firm,"dispatch",uid(),save);await syncToSheets(save);sf(ini);}
-      }},gsSyncing?"Syncing to Sheets...":editId?"Update Dispatch":"Save & Sync Dispatch")
+        if(editId){await dbUpdate(firm,"dispatch",editId,save);setEditId(null);}
+        else{await dbs(firm,"dispatch",uid(),save);}
+        sf(ini);toast2(editId?"Updated!":"Dispatch saved!");
+        // ── Auto-sync to Google Sheet ──
+        if(!editId){
+          try{
+            const gsPayload={action:"addEntry",firm:FIRMS[firm].name,...save};
+            fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(gsPayload)})
+              .then(r=>r.json())
+              .then(r=>r.ok?toast2("✅ Synced to Google Sheet"):toast2("⚠ Sheet sync: "+(r.error||"Error"),"err"))
+              .catch(()=>toast2("⚠ Sheet sync failed","err"));
+          }catch(e){}
+        }
+      }},editId?"Update Dispatch":"Save & Sync to Google Sheet")
     ),
     h("div",{className:"card"},
       h("div",{className:"chd"},h("div",{className:"ct"},"Dispatch Register ("+disp.length+")"),h("div",{className:"bgrp"},
