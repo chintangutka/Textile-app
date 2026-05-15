@@ -178,7 +178,7 @@ const today=()=>new Date().toISOString().split("T")[0];
 const fmt=n=>Number(n||0).toLocaleString("en-IN");
 const fmtD=d=>{if(!d)return"";const[y,m,da]=d.split("-");return da+"-"+"Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec".split(",")[+m-1]+"-"+y};
 const daysAgo=d=>{if(!d)return 0;return Math.floor((Date.now()-new Date(d))/(864e5))};
-const GS_URL="https://script.google.com/macros/s/AKfycbzmRk4uIl4NhU92jISXG2TMncVtCITtsdHwN5_ML7sDO088QkRqZ7sLxK4awXHYmJRo/exec";
+const GS_URL="https://script.google.com/macros/s/AKfycbxK3WeBpyDupdSPZfL4gKPoQ-qfvFaHPOSYRr2KbjtMkxd1Ita1R4C0YQRD8_mkOs71/exec";
 const FIRMS={r:{id:"r",name:"Rajesh Textiles"},s:{id:"s",name:"SN Textiles"}};
 
 function csvDL(name,hdr,rows){
@@ -2298,6 +2298,16 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
   const cancelEdit=()=>{setEditId(null);sf(ini)};
   const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
   const[srch,setSrch]=useState(""),[fc,setFc]=useState("");
+  const[sheetInfo,setSheetInfo]=useState(null); // {name, url}
+  const[sheetErr,setSheetErr]=useState(false);
+
+  // Fetch connected sheet info on mount
+  useEffect(()=>{
+    fetch(GS_URL)
+      .then(r=>r.json())
+      .then(d=>{if(d.ok&&d.url)setSheetInfo(d);else setSheetErr(true);})
+      .catch(()=>setSheetErr(true));
+  },[]);
 
   // ── Excel Import state ──
   const[impOpen,setImpOpen]=useState(false);
@@ -2422,6 +2432,26 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
           h("input",{type:"file",accept:".xlsx,.xls,.csv",ref:impFileRef,style:{display:"none"},onChange:onExcelFile}),
           h("button",{className:"btn btn-sm btn-p",onClick:()=>impFileRef.current.click()},"⬆ Upload Excel / CSV")
         )
+      ),
+
+      // ── Connected Google Sheet indicator ──
+      h("div",{style:{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",marginBottom:8,borderRadius:"var(--r)",
+          background:sheetInfo?"#E8F5E9":sheetErr?"#FFF3E0":"var(--bg)",
+          border:"1px solid "+(sheetInfo?"#A5D6A7":sheetErr?"#FFCC80":"var(--bdl)")}},
+        h("span",{style:{fontSize:16}},sheetInfo?"📊":sheetErr?"⚠":"⏳"),
+        h("div",{style:{flex:1}},
+          sheetInfo
+            ?h("div",null,
+                h("span",{style:{fontSize:12,fontWeight:600,color:"#2e7d32"}},"Connected to: "),
+                h("a",{href:sheetInfo.url,target:"_blank",style:{fontSize:12,fontWeight:700,color:"#1565c0",textDecoration:"none"}},
+                  "📄 "+sheetInfo.name),
+                h("span",{style:{fontSize:11,color:"var(--mu)",marginLeft:6}},"— dispatch entries sync here automatically")
+              )
+            :sheetErr
+              ?h("span",{style:{fontSize:11,color:"#e65100"}},"Could not reach Google Sheet — check internet or redeploy the Apps Script")
+              :h("span",{style:{fontSize:11,color:"var(--mu)"}},"Checking Google Sheet connection…")
+        ),
+        sheetInfo&&h("a",{href:sheetInfo.url,target:"_blank",className:"btn btn-sm",style:{fontSize:11}},"Open Sheet ↗")
       ),
       !impOpen&&h("div",{style:{fontSize:11,color:"var(--mu)",lineHeight:1.7}},
         "1. Click 📎 to open your OneDrive sheet → File → Save a copy or Download as Excel",h("br",null),
