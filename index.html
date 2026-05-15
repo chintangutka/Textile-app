@@ -2391,11 +2391,11 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
       challanNo:dispEntry.challanNo,customer:dispEntry.customer,designNo:dispEntry.designNo,
       challanDate:dispEntry.date,billTotal:dispEntry.total,payments:pmts};
     try{
-      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(gsSync)})
+      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify(gsSync)})
         .then(r=>r.json())
         .then(r=>r.ok?toast2("Sheet: "+r.synced+" instalment"+(r.synced!==1?"s":"")+" in Payment Ledger"):toast2("Sheet: "+(r.error||"Error"),"err"))
         .catch(()=>{});
-      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},
+      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"text/plain"},
         body:JSON.stringify({action:"updatePayment",firm:FIRMS[firm].name,challanNo:dispEntry.challanNo,
           amountReceived:totalRcvd,paymentStatus:status,paymentReceived:totalRcvd})})
         .then(r=>r.json()).catch(()=>{});
@@ -2414,9 +2414,9 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
       challanNo:dispEntry.challanNo,customer:dispEntry.customer,designNo:dispEntry.designNo,
       challanDate:dispEntry.date,billTotal:dispEntry.total,payments:pmts};
     try{
-      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(gsSync)})
+      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify(gsSync)})
         .then(r=>r.json()).catch(()=>{});
-      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},
+      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"text/plain"},
         body:JSON.stringify({action:"updatePayment",firm:FIRMS[firm].name,challanNo:dispEntry.challanNo,
           amountReceived:totalRcvd,paymentStatus:status,paymentReceived:totalRcvd})})
         .then(r=>r.json()).catch(()=>{});
@@ -2427,7 +2427,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     setSyncing(true);toast2("Pushing all entries…");
     try{
       const entries=disp.map(r=>({...r,firm:FIRMS[firm].name}));
-      const res=await fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"pushAll",firm:FIRMS[firm].name,entries})});
+      const res=await fetch(GS_URL,{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify({action:"pushAll",firm:FIRMS[firm].name,entries})});
       const j=await res.json();
       if(j.ok)toast2("✅ Pushed "+j.pushed+" entries to Sheet");
       else toast2("⚠ Push failed: "+(j.error||"Error"),"err");
@@ -2489,7 +2489,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     sf(ini);toast2(isEdit?"Updated!":"Dispatch saved!");
     try{
       const gs={action:isEdit?"updateEntry":"addEntry",firm:FIRMS[firm].name,...save};
-      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(gs)})
+      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify(gs)})
         .then(r=>r.json()).then(r=>r.ok?toast2("✅ "+(isEdit?"Updated":"Synced")+" in Sheet"):toast2("⚠ Sheet: "+(r.error||"?"),"err"))
         .catch(()=>toast2("⚠ Sheet sync failed","err"));
     }catch(e){}
