@@ -2397,7 +2397,29 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     toast2(count+" dispatches imported!");
   }
 
-  // ── Sheet → App sync ──
+  // ── Push ALL existing Firestore entries → Google Sheet ──
+  async function pushAllToSheet(){
+    if(!confirm("Push all "+disp.length+" dispatch entries to Google Sheet? This will overwrite existing sheet data."))return;
+    setSyncing(true);toast2("Pushing all entries to Sheet…");
+    try{
+      const entries=disp.map(r=>({
+        action:"addEntry",firm:FIRMS[firm].name,
+        date:r.date||"",challanNo:r.challanNo||"",customer:r.customer||"",
+        designNo:r.designNo||"",meters:+r.meters||0,taka:+r.taka||0,rate:+r.rate||0,
+        deliveryPlace:r.deliveryPlace||"",transporter:r.transporter||"",lotNo:r.lotNo||"",
+        discountPct:+r.discountPct||0,taxable:+r.taxable||0,discAmt:+r.discAmt||0,
+        afterDisc:+r.afterDisc||0,sgst:+r.sgst||0,cgst:+r.cgst||0,total:+r.total||0,
+        amountReceived:+r.amountReceived||0,paymentStatus:r.paymentStatus||"Pending",
+        remarks:r.remarks||""
+      }));
+      const res=await fetch(GS_URL,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"pushAll",firm:FIRMS[firm].name,entries})});
+      const json=await res.json();
+      if(json.ok)toast2("✅ Pushed "+json.pushed+" entries to Google Sheet");
+      else toast2("⚠ Push failed: "+(json.error||"Error"),"err");
+    }catch(e){toast2("Push error: "+e.message,"err");}
+    setSyncing(false);
+  }
   async function syncFromSheet(){
     setSyncing(true);toast2("Pulling from Google Sheet…");
     try{
@@ -2489,6 +2511,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         h("div",{className:"ct"},"📥 Import & Sync"),
         h("div",{style:{display:"flex",gap:8,alignItems:"center"}},
           h("button",{className:"btn btn-sm"+(syncing?" btn-p":""),onClick:syncFromSheet,disabled:syncing},syncing?"⏳ Syncing…":"🔄 Pull from Sheet"),
+          h("button",{className:"btn btn-sm",style:{background:"#1565C0",color:"#fff"},onClick:pushAllToSheet,disabled:syncing},"⬆ Push all to Sheet"),
           h("a",{href:"https://1drv.ms/x/c/d88fff87125c45ba/IQBHbh44Es-5TaSA3xJ9dBXWAZzsreKVvcAwF5NgCR-hNWg",target:"_blank",className:"btn btn-sm"},"📎 OneDrive"),
           h("input",{type:"file",accept:".xlsx,.xls,.csv",ref:impFileRef,style:{display:"none"},onChange:onExcelFile}),
           h("button",{className:"btn btn-sm btn-p",onClick:()=>impFileRef.current.click()},"⬆ Upload Excel")
