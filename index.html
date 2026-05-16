@@ -2396,19 +2396,20 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
           const ex=disp.find(d=>d.challanNo&&String(d.challanNo)===String(se.challan));
           if(!ex)continue;
           const shRcvd=+se.amtRcvd||0,appRcvd=+ex.amountReceived||0;
-          if(Math.abs(shRcvd-appRcvd)>0.01){
-            // Fetch Payment Ledger rows for this challan to get full instalment history
-            let pmts=ex.payments||[];
-            try{
-              const pr=await fetch(getGsUrl()+"?action=payments&firm="+encodeURIComponent(FIRMS[firm].name)+"&challan="+encodeURIComponent(se.challan));
-              const pj=await pr.json();
-              if(pj.ok&&pj.payments&&pj.payments.length>0){
-                pmts=pj.payments.map(p=>({id:p.instNum+"_"+p.challan,date:p.date||today(),amount:+p.amount||0,note:p.note||"From Sheet"}));
-              } else if(shRcvd>0){
-                pmts=[{id:uid(),date:today(),amount:shRcvd,note:"Synced from Sheet"}];
-              }
-            }catch(e){ pmts=shRcvd>0?[{id:uid(),date:today(),amount:shRcvd,note:"Synced from Sheet"}]:[];}
-            await dbUpdate(firm,"dispatch",ex._id,{...ex,amountReceived:shRcvd,paymentStatus:calcPmt(shRcvd,ex.total),payments:pmts});
+          // Build payments from sheet instalment columns (i1date/i1amt ... i5date/i5amt)
+          const shPmts=[];
+          for(let i=1;i<=5;i++){
+            const dt=se["i"+i+"date"],amt=+se["i"+i+"amt"]||0;
+            if(amt>0)shPmts.push({id:"sh_"+se.challan+"_"+i,
+              date:dt?new Date(dt).toISOString().slice(0,10):today(),amount:amt,note:"From Sheet"});
+          }
+          const rcvdChanged=Math.abs(shRcvd-appRcvd)>0.01;
+          const pmtsChanged=shPmts.length>0&&shPmts.length!==(ex.payments||[]).length;
+          if(rcvdChanged||pmtsChanged){
+            await dbUpdate(firm,"dispatch",ex._id,{...ex,
+              amountReceived:shRcvd,paymentStatus:calcPmt(shRcvd,ex.total),
+              payments:shPmts.length>0?shPmts:(ex.payments||[])
+            });
           }
         }
       }catch(e){}
@@ -2571,6 +2572,10 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
       for(const se of j.entries||[]){
         if(!se.challan&&!se.meters)continue;
         const shRcvd=+se.amtRcvd||0;
+        // Build payments from instalment columns
+        const shPmts=[];
+        for(let i=1;i<=5;i++){const dt=se["i"+i+"date"],amt=+se["i"+i+"amt"]||0;
+          if(amt>0)shPmts.push({id:"sh_"+se.challan+"_"+i,date:dt?new Date(dt).toISOString().slice(0,10):today(),amount:amt,note:"From Sheet"});}
         const mapped={date:se.date?new Date(se.date).toISOString().slice(0,10):"",
           challanNo:se.challan||"",customer:se.party||"",designNo:se.quality||"",
           meters:+se.meters||0,taka:+se.taka||0,rate:+se.rate||0,deliveryPlace:se.delivery||"",
@@ -2579,12 +2584,12 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
           amountReceived:shRcvd,paymentStatus:calcPmt(shRcvd,+se.total||0),remarks:se.remarks||""};
         const ex=disp.find(d=>d.challanNo&&String(d.challanNo)===String(se.challan));
         if(ex){
-          if(Math.abs((+ex.amountReceived||0)-shRcvd)>0.01){
-            const pmts=shRcvd>0&&(!ex.payments||!ex.payments.length)?[{id:uid(),date:today(),amount:shRcvd,note:"From Sheet"}]:ex.payments||[];
-            await dbUpdate(firm,"dispatch",ex._id,{...ex,...mapped,payments:pmts});updated++;
+          if(Math.abs((+ex.amountReceived||0)-shRcvd)>0.01||shPmts.length!==(ex.payments||[]).length){
+            await dbUpdate(firm,"dispatch",ex._id,{...ex,...mapped,
+              payments:shPmts.length>0?shPmts:(ex.payments||[])});updated++;
           }
         } else {
-          await dbs(firm,"dispatch",uid(),{...mapped,payments:shRcvd>0?[{id:uid(),date:today(),amount:shRcvd,note:"From Sheet"}]:[]});added++;
+          await dbs(firm,"dispatch",uid(),{...mapped,payments:shPmts.length>0?shPmts:[]});added++;
         }
       }
       toast2("Done: "+added+" new, "+updated+" updated");
