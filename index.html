@@ -2397,10 +2397,18 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
           if(!ex)continue;
           const shRcvd=+se.amtRcvd||0,appRcvd=+ex.amountReceived||0;
           if(Math.abs(shRcvd-appRcvd)>0.01){
-            const pmts=shRcvd>0&&!(ex.payments||[]).length
-              ?[{id:uid(),date:today(),amount:shRcvd,note:"Synced from Sheet"}]:ex.payments||[];
-            await dbUpdate(firm,"dispatch",ex._id,{...ex,amountReceived:shRcvd,
-              paymentStatus:calcPmt(shRcvd,ex.total),payments:pmts});
+            // Fetch Payment Ledger rows for this challan to get full instalment history
+            let pmts=ex.payments||[];
+            try{
+              const pr=await fetch(getGsUrl()+"?action=payments&firm="+encodeURIComponent(FIRMS[firm].name)+"&challan="+encodeURIComponent(se.challan));
+              const pj=await pr.json();
+              if(pj.ok&&pj.payments&&pj.payments.length>0){
+                pmts=pj.payments.map(p=>({id:p.instNum+"_"+p.challan,date:p.date||today(),amount:+p.amount||0,note:p.note||"From Sheet"}));
+              } else if(shRcvd>0){
+                pmts=[{id:uid(),date:today(),amount:shRcvd,note:"Synced from Sheet"}];
+              }
+            }catch(e){ pmts=shRcvd>0?[{id:uid(),date:today(),amount:shRcvd,note:"Synced from Sheet"}]:[];}
+            await dbUpdate(firm,"dispatch",ex._id,{...ex,amountReceived:shRcvd,paymentStatus:calcPmt(shRcvd,ex.total),payments:pmts});
           }
         }
       }catch(e){}
