@@ -2379,17 +2379,51 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
 
   useEffect(()=>{
     if(window._gsInfo&&window._gsInfo._url===getGsUrl()){setSheetInfo(window._gsInfo);return;}
-    fetch(GS_URL).then(r=>r.json())
+    fetch(getGsUrl()).then(r=>r.json())
       .then(d=>{if(d.ok&&d.url){setSheetInfo(d);window._gsInfo={...d,_url:getGsUrl()};}else setSheetErr(true);})
       .catch(()=>setSheetErr(true));
   },[]);
 
+  // Auto-sync: silent background pull every 60 seconds
+  useEffect(()=>{
+    const pull=async()=>{
+      try{
+        const res=await fetch(getGsUrl()+"?action=data&firm="+encodeURIComponent(FIRMS[firm].name));
+        const j=await res.json();if(!j.ok)return;
+        for(const se of j.entries||[]){
+          const ex=disp.find(d=>d.challanNo&&String(d.challanNo)===String(se.challan));
+          if(!ex)continue;
+          const shRcvd=+se.amtRcvd||0,appRcvd=+ex.amountReceived||0;
+          if(Math.abs(shRcvd-appRcvd)>0.01){
+            const pmts=shRcvd>0&&!(ex.payments||[]).length
+              ?[{id:uid(),date:today(),amount:shRcvd,note:"Synced from Sheet"}]:ex.payments||[];
+            await dbUpdate(firm,"dispatch",ex._id,{...ex,amountReceived:shRcvd,
+              paymentStatus:calcPmt(shRcvd,ex.total),payments:pmts});
+          }
+        }
+      }catch(e){}
+    };
+    const id=setInterval(pull,60000);
+    return()=>clearInterval(id);
+  },[firm,disp]);
+
   function startEdit(r){
     setEditId(r._id);
+    // Normalize delivery to avoid repeated concatenation
+    const rawDp=r.deliveryPlace||r.delivery||"";
+    const rawTp=r.transporter||"";
+    let dp=rawDp, tp=rawTp;
+    if(rawDp&&rawTp&&rawDp.includes(" / "+rawTp)){
+      // deliveryPlace already has transporter appended — strip it
+      dp=rawDp.split(" / ").filter(p=>p.trim()!==rawTp.trim()).join(" / ");
+    } else if(rawDp.includes(" / ")&&!rawTp){
+      // combined in one field — split it
+      const parts=rawDp.split(" / ");
+      dp=parts[0]; tp=parts.slice(1).join(" / ");
+    }
     sf({date:r.date||today(),challanNo:r.challanNo||"",customer:r.customer||"",
       designNo:r.designNo||"",meters:r.meters||"",taka:r.taka||"",rate:r.rate||"",
-      deliveryPlace:r.deliveryPlace||(r.delivery?r.delivery.split(" / ")[0]:""),
-      transporter:r.transporter||(r.delivery&&r.delivery.includes(" / ")?r.delivery.split(" / ").slice(1).join(" / "):""),
+      deliveryPlace:dp,transporter:tp,
       discountPct:r.discountPct||"",lotNo:r.lotNo||"",remarks:r.remarks||""});
   }
   function cancelEdit(){setEditId(null);sf(ini);}
