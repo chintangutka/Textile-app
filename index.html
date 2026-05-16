@@ -178,7 +178,10 @@ const today=()=>new Date().toISOString().split("T")[0];
 const fmt=n=>Number(n||0).toLocaleString("en-IN");
 const fmtD=d=>{if(!d)return"";const[y,m,da]=d.split("-");return da+"-"+"Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec".split(",")[+m-1]+"-"+y};
 const daysAgo=d=>{if(!d)return 0;return Math.floor((Date.now()-new Date(d))/(864e5))};
-const GS_URL="https://script.google.com/macros/s/AKfycbybyTUh2FdoAcE_50ygCCP7FtMKyRbTUalbYQjSajAWSr9at1NAk1BOzPnXlRrYdrlG_w/exec";
+const GS_URL_DEFAULT="https://script.google.com/macros/s/AKfycbybyTUh2FdoAcE_50ygCCP7FtMKyRbTUalbYQjSajAWSr9at1NAk1BOzPnXlRrYdrlG_w/exec";
+function getGsUrl(){return localStorage.getItem("tsm_gs_url")||GS_URL_DEFAULT;}
+// Always use getGsUrl() — alias for convenience in all fetch calls
+Object.defineProperty(window,"GS_URL",{get:()=>getGsUrl()});
 const FIRMS={r:{id:"r",name:"Rajesh Textiles"},s:{id:"s",name:"SN Textiles"}};
 
 function csvDL(name,hdr,rows){
@@ -2293,6 +2296,52 @@ function PYarnLed({inw,M,fname}){
 // ── FABRIC DISPATCH / SALE ──
 // ── FABRIC DISPATCH / SALE ──
 // ── FABRIC DISPATCH / SALE ──
+// ── Google Script URL Editor (persistent via localStorage) ──
+function GsUrlEditor(){
+  const[editing,setEditing]=useState(false);
+  const[val,setVal]=useState(()=>localStorage.getItem("tsm_gs_url")||"");
+  const[saved,setSaved]=useState(false);
+  const current=getGsUrl();
+  const isCustom=!!localStorage.getItem("tsm_gs_url");
+
+  function save(){
+    const url=val.trim();
+    if(!url.includes("script.google.com")){alert("Paste a valid Google Apps Script URL");return;}
+    localStorage.setItem("tsm_gs_url",url);
+    window._gsInfo=null; // clear cache so banner re-fetches
+    setSaved(true);setEditing(false);
+    setTimeout(()=>setSaved(false),3000);
+    location.reload(); // reload so all components use new URL
+  }
+  function reset(){
+    localStorage.removeItem("tsm_gs_url");
+    window._gsInfo=null;
+    setVal("");setEditing(false);
+    location.reload();
+  }
+
+  if(editing) return h("div",{style:{padding:"8px 10px",background:"#FFF8E1",border:"1px solid #FFD54F",borderRadius:"var(--r)",marginBottom:8}},
+    h("div",{style:{fontSize:11,fontWeight:600,color:"#F57F17",marginBottom:6}},"🔗 Paste your Google Apps Script deployment URL:"),
+    h("div",{style:{display:"flex",gap:6}},
+      h("input",{value:val,onChange:e=>setVal(e.target.value),
+        placeholder:"https://script.google.com/macros/s/AKfycb.../exec",
+        style:{flex:1,height:30,fontSize:11,fontFamily:"monospace"}}),
+      h("button",{className:"btn btn-p btn-sm",onClick:save},"✓ Save"),
+      h("button",{className:"btn btn-sm",onClick:()=>setEditing(false)},"Cancel")
+    ),
+    h("div",{style:{fontSize:10,color:"var(--mu)",marginTop:4}},"Get URL: Apps Script → Deploy → Manage deployments → copy URL")
+  );
+
+  return h("div",{style:{display:"flex",alignItems:"center",gap:6,padding:"5px 8px",background:"var(--bg)",borderRadius:"var(--r)",marginBottom:6,fontSize:11}},
+    h("span",{style:{color:"var(--mu)"}},"🔗 Script URL:"),
+    h("span",{style:{fontFamily:"monospace",fontSize:10,color:"var(--mu)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+      current.replace("https://script.google.com/macros/s/","…/").replace("/exec","")),
+    saved&&h("span",{style:{color:"var(--ok)",fontSize:11}},"✅ Saved"),
+    h("button",{className:"btn btn-sm",style:{fontSize:10},onClick:()=>{setVal(current);setEditing(true);}},isCustom?"✏ Change URL":"✏ Update URL"),
+    isCustom&&h("button",{className:"btn btn-sm",style:{fontSize:10,color:"var(--er)"},onClick:reset},"Reset")
+  );
+}
+
 // ── FABRIC DISPATCH ──────────────────────────────────────────
 function PDisp({firm,M,disp,fab,toast2,updM,fname}){
   const[f,sf]=useState({date:today(),challanNo:"",customer:"",designNo:"",meters:"",taka:"",rate:"",deliveryPlace:"",transporter:"",discountPct:"",lotNo:"",remarks:""});
@@ -2329,9 +2378,9 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
   }
 
   useEffect(()=>{
-    if(window._gsInfo&&window._gsInfo._url===GS_URL){setSheetInfo(window._gsInfo);return;}
+    if(window._gsInfo&&window._gsInfo._url===getGsUrl()){setSheetInfo(window._gsInfo);return;}
     fetch(GS_URL).then(r=>r.json())
-      .then(d=>{if(d.ok&&d.url){setSheetInfo(d);window._gsInfo={...d,_url:GS_URL};}else setSheetErr(true);})
+      .then(d=>{if(d.ok&&d.url){setSheetInfo(d);window._gsInfo={...d,_url:getGsUrl()};}else setSheetErr(true);})
       .catch(()=>setSheetErr(true));
   },[]);
 
@@ -2531,6 +2580,8 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
           h("button",{className:"btn btn-sm btn-p",onClick:()=>impRef.current.click()},"⬆ Upload Excel")
         )
       ),
+      // ── Google Script URL editor ──
+      h(GsUrlEditor,null),
       h("div",{style:{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",borderRadius:"var(--r)",fontSize:11,
           background:sheetInfo?"#E8F5E9":sheetErr?"#FFF3E0":"var(--bg)",
           border:"1px solid "+(sheetInfo?"#A5D6A7":sheetErr?"#FFCC80":"var(--bdl)"),
