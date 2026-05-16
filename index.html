@@ -178,7 +178,7 @@ const today=()=>new Date().toISOString().split("T")[0];
 const fmt=n=>Number(n||0).toLocaleString("en-IN");
 const fmtD=d=>{if(!d)return"";const[y,m,da]=d.split("-");return da+"-"+"Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec".split(",")[+m-1]+"-"+y};
 const daysAgo=d=>{if(!d)return 0;return Math.floor((Date.now()-new Date(d))/(864e5))};
-const GS_URL="https://script.google.com/macros/s/AKfycbxK3WeBpyDupdSPZfL4gKPoQ-qfvFaHPOSYRr2KbjtMkxd1Ita1R4C0YQRD8_mkOs71/exec";
+const GS_URL="https://script.google.com/macros/s/AKfycbybyTUh2FdoAcE_50ygCCP7FtMKyRbTUalbYQjSajAWSr9at1NAk1BOzPnXlRrYdrlG_w/exec";
 const FIRMS={r:{id:"r",name:"Rajesh Textiles"},s:{id:"s",name:"SN Textiles"}};
 
 function csvDL(name,hdr,rows){
@@ -2329,9 +2329,9 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
   }
 
   useEffect(()=>{
-    if(window._gsInfo){setSheetInfo(window._gsInfo);return;}
+    if(window._gsInfo&&window._gsInfo._url===GS_URL){setSheetInfo(window._gsInfo);return;}
     fetch(GS_URL).then(r=>r.json())
-      .then(d=>{if(d.ok&&d.url){setSheetInfo(d);window._gsInfo=d;}else setSheetErr(true);})
+      .then(d=>{if(d.ok&&d.url){setSheetInfo(d);window._gsInfo={...d,_url:GS_URL};}else setSheetErr(true);})
       .catch(()=>setSheetErr(true));
   },[]);
 
@@ -2339,7 +2339,8 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     setEditId(r._id);
     sf({date:r.date||today(),challanNo:r.challanNo||"",customer:r.customer||"",
       designNo:r.designNo||"",meters:r.meters||"",taka:r.taka||"",rate:r.rate||"",
-      deliveryPlace:r.deliveryPlace||"",transporter:r.transporter||"",
+      deliveryPlace:r.deliveryPlace||(r.delivery?r.delivery.split(" / ")[0]:""),
+      transporter:r.transporter||(r.delivery&&r.delivery.includes(" / ")?r.delivery.split(" / ").slice(1).join(" / "):""),
       discountPct:r.discountPct||"",lotNo:r.lotNo||"",remarks:r.remarks||""});
   }
   function cancelEdit(){setEditId(null);sf(ini);}
