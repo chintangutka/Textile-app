@@ -232,7 +232,8 @@ function Root(){
 
 // App
 function App(){
-  const[page,setPage]=useState("dash");
+  const[page,setPage]=useState(()=>localStorage.getItem("tsm_page")||"dash");
+  const nav=(p)=>{setPage(p);localStorage.setItem("tsm_page",p);};
   const[firm,setFirm]=useState(()=>localStorage.getItem("tsm_f")||"r");
   const[conn,setConn]=useState("pend");
   const[toast,setT]=useState(null);
@@ -246,7 +247,7 @@ function App(){
   const[disp,setDisp]=useState([]);const[delDisp,setDelDisp]=useState([]);
 
   const toast2=(msg,type="ok")=>{setT({msg,type});setTimeout(()=>setT(null),3000)};
-  const go=(p)=>{setPage(p);setDr(false)};
+  const go=(p)=>{nav(p);setDr(false)};
   const swf=(f)=>{setFirm(f);localStorage.setItem("tsm_f",f)};
 
   useEffect(()=>{
@@ -394,7 +395,7 @@ function App(){
 
   const stockVal=useMemo(()=>{let v=0;Object.entries(yBal).forEach(([k,q])=>{const[yt]=k.split("||");v+=q*((M.yarnRates||{})[yt]||0)});return v},[yBal,M]);
 
-  const nav=[
+  const navItems=[
     {id:"dash",l:"Dashboard",ic:"⊞",g:"Overview"},
     {id:"alerts",l:"Alerts",ic:"🔔",g:"Overview",badge:alerts.length},
     {id:"inw",l:"Yarn Inward",ic:"↓",g:"Transactions"},
@@ -416,14 +417,14 @@ function App(){
   const P=PGS[page]||PDash;
 
   const bn=[{id:"dash",ic:"⊞",l:"Home"},{id:"alerts",ic:"🔔",l:"Alerts",badge:alerts.length},{id:"inw",ic:"↓",l:"Inward"},{id:"fab",ic:"≋",l:"Fabric"}];
-  const drItems=nav.filter(n=>!bn.find(b=>b.id===n.id));
+  const drItems=navItems.filter(n=>!bn.find(b=>b.id===n.id));
 
   return h("div",{className:"app"},
     h("aside",{className:"side"},
       h("div",{className:"logo"},h("div",{className:"logo-name"},FIRMS[firm].name),h("div",{className:"logo-sub"},"Yarn & Fabric Stock")),
       ["Overview","Transactions","Reports","Settings"].map(g=>h("div",{key:g},
         h("div",{className:"ns"},g),
-        nav.filter(n=>n.g===g).map(n=>h("button",{key:n.id,className:"ni"+(page===n.id?" on":""),onClick:()=>go(n.id)},
+        navItems.filter(n=>n.g===g).map(n=>h("button",{key:n.id,className:"ni"+(page===n.id?" on":""),onClick:()=>go(n.id)},
           h("span",{className:"ni-ic"},n.ic),h("span",null,n.l),n.badge>0&&h("span",{className:"nb"},n.badge)
         ))
       )),
@@ -2373,7 +2374,8 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
   function calcPmt(rcvd,tot){
     const r=+rcvd||0,t=+tot||0;
     if(r<=0)return "Pending";
-    if(r>=t*0.999&&t>0)return "Received";
+    if(t>0&&r>t*1.001)return "Excess";
+    if(t>0&&r>=t*0.999)return "Received";
     return "Partial";
   }
 
@@ -2750,8 +2752,9 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
               (r.payments||[]).length>0&&h("div",{style:{fontSize:9,color:"var(--mu)"}},"↳ "+(r.payments.length)+" inst.")
             ),
             Td(pend>0.01?h("span",{style:{color:"var(--er)",fontFamily:"DM Mono,monospace",fontSize:12}},"₹"+fmt(pend)):h("span",{style:{color:"var(--ok)",fontSize:11}},"✓ Nil")),
-            h("td",null,h("span",{className:"bdg "+(st==="Received"?"bo":st==="Partial"?"bw":"be"),style:{fontSize:10}},
-              st==="Received"?"✅ Paid":st==="Partial"?"🔵 Partial":"⏳ Pending"
+            h("td",null,h("span",{className:"bdg "+(st==="Received"?"bo":st==="Partial"?"bw":st==="Excess"?"bi":"be"),
+              style:{fontSize:10,background:st==="Excess"?"#EDE7F6":undefined,color:st==="Excess"?"#4527A0":undefined}},
+              st==="Received"?"✅ Paid":st==="Partial"?"🔵 Partial":st==="Excess"?"⬆ Excess":"⏳ Pending"
             )),
             h("td",null,h("div",{style:{display:"flex",gap:3}},
               h("button",{className:"btn btn-sm",
@@ -2772,7 +2775,10 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         h("div",{style:{flex:1}},
           h("div",{style:{fontWeight:700,fontSize:13,color:"#283593"}},"💳 Payment instalments — "+selEnt.customer+" | Challan: "+(selEnt.challanNo||"—")),
           h("div",{style:{fontSize:11,color:"var(--mu)",marginTop:2}},
-            "Bill: ₹"+fmt(selEnt.total||0)+"   Rcvd: ₹"+fmt(+selEnt.amountReceived||0)+"   Pending: ₹"+fmt(Math.max(0,(+selEnt.total||0)-(+selEnt.amountReceived||0))))
+            "Bill: ₹"+fmt(selEnt.total||0)+"   Rcvd: ₹"+fmt(+selEnt.amountReceived||0)+
+          (((+selEnt.amountReceived||0)>(+selEnt.total||0)*1.001&&(+selEnt.total||0)>0)?
+            "   ⬆ Excess: ₹"+fmt((+selEnt.amountReceived||0)-(+selEnt.total||0)):
+            "   Pending: ₹"+fmt(Math.max(0,(+selEnt.total||0)-(+selEnt.amountReceived||0)))))
         ),
         (selEnt.amountReceived||0)>=(+selEnt.total||0)*0.999&&(+selEnt.total||0)>0&&h("span",{className:"bdg bo"},"🎉 FULLY PAID"),
         h("button",{className:"btn btn-sm",onClick:()=>setSelEntry(null)},"✕ Close")
