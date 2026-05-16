@@ -2377,29 +2377,34 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     return "Partial";
   }
 
+  // ── Post to Google Sheet (single reliable function) ──
+  async function gsPost(payload){
+    try{
+      const res=await fetch(GS_URL,{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify(payload)});
+      const j=await res.json();
+      return j;
+    }catch(e){return {ok:false,error:e.message};}
+  }
+
   async function addPayment(dispEntry){
     if(!pmtForm.amount||+pmtForm.amount<=0){toast2("Enter a valid amount","err");return}
     const newPmt={id:uid(),date:pmtForm.date||today(),amount:+pmtForm.amount,note:pmtForm.note||""};
     const pmts=[...(dispEntry.payments||[]),newPmt];
     const totalRcvd=pmts.reduce((a,p)=>a+(+p.amount||0),0);
     const status=calcPayStatus(totalRcvd,dispEntry.total);
+    // 1. Save to Firestore
     await dbUpdate(firm,"dispatch",dispEntry._id,{...dispEntry,payments:pmts,amountReceived:totalRcvd,paymentStatus:status});
     setPmtForm({date:today(),amount:"",note:""});
-    toast2("Instalment recorded");
-    // Sync instalments to Payment Ledger sheet + update firm sheet status
-    const gsSync={action:"syncInstalments",firm:FIRMS[firm].name,
+    toast2("Instalment of Rs"+fmt(+pmtForm.amount)+" recorded");
+    // 2. Sync payment instalments to Payment Ledger sheet
+    const r1=await gsPost({action:"syncInstalments",firm:FIRMS[firm].name,
       challanNo:dispEntry.challanNo,customer:dispEntry.customer,designNo:dispEntry.designNo,
-      challanDate:dispEntry.date,billTotal:dispEntry.total,payments:pmts};
-    try{
-      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify(gsSync)})
-        .then(r=>r.json())
-        .then(r=>r.ok?toast2("Sheet: "+r.synced+" instalment"+(r.synced!==1?"s":"")+" in Payment Ledger"):toast2("Sheet: "+(r.error||"Error"),"err"))
-        .catch(()=>{});
-      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"text/plain"},
-        body:JSON.stringify({action:"updatePayment",firm:FIRMS[firm].name,challanNo:dispEntry.challanNo,
-          amountReceived:totalRcvd,paymentStatus:status,paymentReceived:totalRcvd})})
-        .then(r=>r.json()).catch(()=>{});
-    }catch(e){}
+      challanDate:dispEntry.date,billTotal:dispEntry.total,payments:pmts});
+    if(r1.ok) toast2("Sheet: "+r1.synced+" instalment"+(r1.synced!==1?"s":"")+" in Payment Ledger");
+    else toast2("Sheet sync: "+(r1.error||"Error"),"err");
+    // 3. Update Amt Rcvd + Status in firm sheet row
+    gsPost({action:"updatePayment",firm:FIRMS[firm].name,challanNo:dispEntry.challanNo,
+      amountReceived:totalRcvd,paymentStatus:status,paymentReceived:totalRcvd});
   }
 
   async function deletePayment(dispEntry,pmtId){
@@ -2409,54 +2414,63 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     const status=calcPayStatus(totalRcvd,dispEntry.total);
     await dbUpdate(firm,"dispatch",dispEntry._id,{...dispEntry,payments:pmts,amountReceived:totalRcvd,paymentStatus:status});
     toast2("Instalment removed");
-    // Re-sync remaining instalments to Payment Ledger
-    const gsSync={action:"syncInstalments",firm:FIRMS[firm].name,
+    // Re-sync remaining instalments + update status
+    const r1=await gsPost({action:"syncInstalments",firm:FIRMS[firm].name,
       challanNo:dispEntry.challanNo,customer:dispEntry.customer,designNo:dispEntry.designNo,
-      challanDate:dispEntry.date,billTotal:dispEntry.total,payments:pmts};
-    try{
-      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify(gsSync)})
-        .then(r=>r.json()).catch(()=>{});
-      fetch(GS_URL,{method:"POST",headers:{"Content-Type":"text/plain"},
-        body:JSON.stringify({action:"updatePayment",firm:FIRMS[firm].name,challanNo:dispEntry.challanNo,
-          amountReceived:totalRcvd,paymentStatus:status,paymentReceived:totalRcvd})})
-        .then(r=>r.json()).catch(()=>{});
-    }catch(e){}
-  }
-  async function pushAllToSheet(){
-    if(!confirm("Push all "+disp.length+" entries to Google Sheet?"))return;
-    setSyncing(true);toast2("Pushing all entries…");
-    try{
-      const entries=disp.map(r=>({...r,firm:FIRMS[firm].name}));
-      const res=await fetch(GS_URL,{method:"POST",headers:{"Content-Type":"text/plain"},body:JSON.stringify({action:"pushAll",firm:FIRMS[firm].name,entries})});
-      const j=await res.json();
-      if(j.ok)toast2("✅ Pushed "+j.pushed+" entries to Sheet");
-      else toast2("⚠ Push failed: "+(j.error||"Error"),"err");
-    }catch(e){toast2("Push error: "+e.message,"err");}
-    setSyncing(false);
+      challanDate:dispEntry.date,billTotal:dispEntry.total,payments:pmts});
+    if(!r1.ok) toast2("Sheet sync: "+(r1.error||"Error"),"err");
+    gsPost({action:"updatePayment",firm:FIRMS[firm].name,challanNo:dispEntry.challanNo,
+      amountReceived:totalRcvd,paymentStatus:status,paymentReceived:totalRcvd});
   }
 
+  // ── Sheet → App: pull all entries + payment amounts ──
   async function syncFromSheet(){
     setSyncing(true);toast2("Pulling from Sheet…");
     try{
       const res=await fetch(GS_URL+"?action=data&firm="+encodeURIComponent(FIRMS[firm].name));
       const j=await res.json();
-      if(!j.ok){toast2("Sync failed","err");setSyncing(false);return;}
+      if(!j.ok){toast2("Pull failed: "+(j.error||"Error"),"err");setSyncing(false);return;}
       let added=0,updated=0;
       for(const se of j.entries||[]){
         if(!se.challan&&!se.meters)continue;
+        const sheetRcvd=+se.amtRcvd||0;
+        const sheetStatus=se.payment||"Pending";
         const existing=disp.find(d=>d.challanNo&&String(d.challanNo)===String(se.challan));
-        const mapped={date:se.date?new Date(se.date).toISOString().slice(0,10):"",challanNo:se.challan||"",
-          customer:se.party||"",designNo:se.quality||"",meters:+se.meters||0,taka:+se.taka||0,rate:+se.rate||0,
-          deliveryPlace:se.delivery||"",lotNo:se.lot||"",discountPct:+se.disc||0,taxable:+se.taxable||0,
-          discAmt:+se.discAmt||0,afterDisc:+se.afterDisc||0,sgst:+se.sgst||0,cgst:+se.cgst||0,total:+se.total||0,
-          amountReceived:+se.amtRcvd||0,paymentStatus:se.payment||"Pending",remarks:se.remarks||""};
-        if(existing){if(existing.paymentStatus!==mapped.paymentStatus){await dbUpdate(firm,"dispatch",existing._id,{...existing,...mapped});updated++;}}
-        else{await dbs(firm,"dispatch",uid(),{...mapped,payments:[]});added++;}
+        const mapped={
+          date:se.date?new Date(se.date).toISOString().slice(0,10):"",
+          challanNo:se.challan||"",customer:se.party||"",designNo:se.quality||"",
+          meters:+se.meters||0,taka:+se.taka||0,rate:+se.rate||0,
+          deliveryPlace:se.delivery||"",lotNo:se.lot||"",discountPct:+se.disc||0,
+          taxable:+se.taxable||0,discAmt:+se.discAmt||0,afterDisc:+se.afterDisc||0,
+          sgst:+se.sgst||0,cgst:+se.cgst||0,total:+se.total||0,
+          amountReceived:sheetRcvd,
+          paymentStatus:calcPayStatus(sheetRcvd,+se.total||0), // always compute
+          remarks:se.remarks||""
+        };
+        if(existing){
+          // Update if Sheet has different Amt Rcvd (someone manually edited Sheet)
+          const appRcvd=+existing.amountReceived||0;
+          const diff=Math.abs(sheetRcvd-appRcvd)>0.01;
+          if(diff){
+            // Build simple payment record from Sheet amount if no instalments exist
+            const pmts=existing.payments&&existing.payments.length>0?existing.payments
+              :[{id:uid(),date:today(),amount:sheetRcvd,note:"Synced from Google Sheet"}];
+            const realRcvd=pmts.reduce((a,p)=>a+(+p.amount||0),0);
+            await dbUpdate(firm,"dispatch",existing._id,{...existing,...mapped,
+              payments:realRcvd!==sheetRcvd?[{id:uid(),date:today(),amount:sheetRcvd,note:"Synced from Sheet"}]:pmts,
+              amountReceived:sheetRcvd,paymentStatus:mapped.paymentStatus});
+            updated++;
+          }
+        } else {
+          await dbs(firm,"dispatch",uid(),{...mapped,payments:sheetRcvd>0?[{id:uid(),date:today(),amount:sheetRcvd,note:"From Sheet"}]:[]});
+          added++;
+        }
       }
-      toast2("Sync done: "+added+" new, "+updated+" updated");
-    }catch(e){toast2("Sync error: "+e.message,"err");}
+      toast2("Sheet pull done: "+added+" new, "+updated+" updated");
+    }catch(e){toast2("Pull error: "+e.message,"err");}
     setSyncing(false);
   }
+
 
   const taxable=(+f.meters||0)*(+f.rate||0);
   const discAmt=taxable*(+f.discountPct||0)/100;
