@@ -178,31 +178,6 @@ const today=()=>new Date().toISOString().split("T")[0];
 const fmt=n=>Number(n||0).toLocaleString("en-IN");
 const fmtD=d=>{if(!d)return"";const[y,m,da]=d.split("-");return da+"-"+"Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec".split(",")[+m-1]+"-"+y};
 const daysAgo=d=>{if(!d)return 0;return Math.floor((Date.now()-new Date(d))/(864e5))};
-// ── Sheet date parser: handles yyyy-MM-dd, dd-MMM-yyyy, numeric serials, Date objects ──
-function parseSheetDate(v) {
-  if (!v && v !== 0) return "";
-  // Numeric serial (Google Sheets epoch = 30-Dec-1899, same as Excel)
-  if (typeof v === "number") {
-    if (v < 2) return ""; // 0 or 1 = empty/epoch
-    const ms = (v - 25569) * 86400 * 1000;
-    return new Date(ms).toISOString().slice(0, 10);
-  }
-  const s = String(v).trim();
-  if (!s || s === "0") return "";
-  // Already yyyy-MM-dd
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  // dd-MMM-yyyy  e.g. "17-May-2026"
-  const mmap = {Jan:"01",Feb:"02",Mar:"03",Apr:"04",May:"05",Jun:"06",Jul:"07",Aug:"08",Sep:"09",Oct:"10",Nov:"11",Dec:"12"};
-  const m1 = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
-  if (m1) { const mon = mmap[m1[2]]; if (mon) return m1[3]+"-"+mon+"-"+m1[1].padStart(2,"0"); }
-  // dd/MM/yyyy or MM/dd/yyyy
-  const m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m2) return m2[3]+"-"+m2[2].padStart(2,"0")+"-"+m2[1].padStart(2,"0");
-  // Fallback: native parse
-  const d = new Date(s);
-  if (!isNaN(d.getTime()) && d.getFullYear() >= 1900) return d.toISOString().slice(0, 10);
-  return "";
-}
 const GS_URL_DEFAULT="https://script.google.com/macros/s/AKfycbybyTUh2FdoAcE_50ygCCP7FtMKyRbTUalbYQjSajAWSr9at1NAk1BOzPnXlRrYdrlG_w/exec";
 function getGsUrl(){return localStorage.getItem("tsm_gs_url")||GS_URL_DEFAULT;}
 // Always use getGsUrl() — alias for convenience in all fetch calls
@@ -2411,86 +2386,52 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
       .catch(()=>setSheetErr(true));
   },[]);
 
-  // ── Auto-sync: pull sheet data every 30 s (uses ref to avoid stale-closure/infinite-loop) ──
-  const dispRef=React.useRef(disp);
-  useEffect(()=>{dispRef.current=disp;},[disp]);
-
+  // Auto-sync: silent background pull every 60 seconds
   useEffect(()=>{
-    let active=true;
     const pull=async()=>{
       try{
-        // Fetch entries (amounts + instalments)
         const res=await fetch(getGsUrl()+"?action=data&firm="+encodeURIComponent(FIRMS[firm].name));
-        const j=await res.json();
-        if(!j.ok||!active)return;
-        const currentDisp=dispRef.current;
-        let autoAdded=0,autoUpdated=0;
+        const j=await res.json();if(!j.ok)return;
         for(const se of j.entries||[]){
-          if(!se.challan&&!se.meters)continue;
+          const ex=disp.find(d=>d.challanNo&&String(d.challanNo)===String(se.challan));
+          if(!ex)continue;
           const shRcvd=+se.amtRcvd||0;
-          // Build payments from sheet instalment columns using robust date parser
+          const appRcvd=+ex.amountReceived||0;
+          const appPmts=ex.payments||[];
+          // Read sheet instalment columns → shPmts
           const shPmts=[];
           for(let i=1;i<=5;i++){
-            const dt=se["i"+i+"date"],amt=+se["i"+i+"amt"]||0;
+            const amt=+se["i"+i+"amt"]||0;
             if(amt>0){
-              const parsedDate=parseSheetDate(dt)||today();
-              shPmts.push({id:"sh_"+se.challan+"_"+i,date:parsedDate,amount:amt,note:"From Sheet"});
+              let d=se["i"+i+"date"]||"";
+              if(d instanceof Date)d=d.toISOString().slice(0,10);
+              else if(d&&typeof d==="string"&&d.includes("T"))d=d.slice(0,10);
+              shPmts.push({id:"sh_"+i,date:d||today(),amount:amt,note:"From Sheet"});
             }
           }
-          const ex=currentDisp.find(d=>d.challanNo&&String(d.challanNo)===String(se.challan));
-          if(ex){
-            // ── Update existing entry if sheet data changed ──
-            const appRcvd=+ex.amountReceived||0;
-            const appPmts=ex.payments||[];
-            const rcvdChanged=Math.abs(shRcvd-appRcvd)>0.01;
-            const pmtsChanged=shPmts.length>0&&shPmts.length!==appPmts.length;
-            const amtsChanged=shPmts.length>0&&shPmts.some((sp,idx2)=>{
-              const ap=appPmts[idx2];return !ap||Math.abs((+ap.amount||0)-(+sp.amount||0))>0.01;
-            });
-            // Also check if core fields changed (date, meters, rate etc)
-            const coreChanged=Math.abs((+ex.meters||0)-(+se.meters||0))>0.001||
-              Math.abs((+ex.rate||0)-(+se.rate||0))>0.001||
-              Math.abs((+ex.total||0)-(+se.total||0))>0.01;
-            if((rcvdChanged||pmtsChanged||amtsChanged||coreChanged)&&active){
-              const shDate=parseSheetDate(se.date)||ex.date||today();
+          if(shPmts.length>0){
+            // SHEET → APP: sheet has data, check if it differs from app
+            const differs=shPmts.length!==appPmts.length
+              ||Math.abs(shRcvd-appRcvd)>0.01
+              ||shPmts.some((p,i)=>{const e=appPmts[i];return !e||p.date!==e.date||Math.abs(p.amount-e.amount)>0.01;});
+            if(differs){
               await dbUpdate(firm,"dispatch",ex._id,{...ex,
-                date:shDate,meters:+se.meters||ex.meters,rate:+se.rate||ex.rate,
-                taka:+se.taka||ex.taka,discountPct:+se.disc||ex.discountPct,
-                total:+se.total||ex.total,taxable:+se.taxable||ex.taxable,
-                discAmt:+se.discAmt||ex.discAmt,afterDisc:+se.afterDisc||ex.afterDisc,
-                sgst:+se.sgst||ex.sgst,cgst:+se.cgst||ex.cgst,
-                amountReceived:shRcvd,paymentStatus:calcPmt(shRcvd,+se.total||ex.total),
-                payments:shPmts.length>0?shPmts:appPmts
-              });
-              autoUpdated++;
+                amountReceived:shRcvd,paymentStatus:calcPmt(shRcvd,ex.total),payments:shPmts});
             }
-          } else {
-            // ── New entry found in sheet — add to Firebase ──
-            if(!active)continue;
-            const shDate=parseSheetDate(se.date)||today();
-            const newEntry={
-              date:shDate,challanNo:String(se.challan||""),customer:se.party||"",
-              designNo:se.quality||"",meters:+se.meters||0,taka:+se.taka||0,
-              rate:+se.rate||0,deliveryPlace:se.delivery||"",lotNo:se.lot||"",
-              discountPct:+se.disc||0,taxable:+se.taxable||0,discAmt:+se.discAmt||0,
-              afterDisc:+se.afterDisc||0,sgst:+se.sgst||0,cgst:+se.cgst||0,
-              total:+se.total||0,amountReceived:shRcvd,
-              paymentStatus:calcPmt(shRcvd,+se.total||0),remarks:se.remarks||"",
-              payments:shPmts
-            };
-            await dbs(firm,"dispatch",uid(),newEntry);
-            autoAdded++;
+          } else if(appPmts.length>0&&appRcvd>0.01){
+            // APP → SHEET: app has data but sheet empty → push to sheet
+            gsPost({action:"syncInstalments",firm:FIRMS[firm].name,challanNo:ex.challanNo,
+              customer:ex.customer,designNo:ex.designNo,challanDate:ex.date,
+              billTotal:ex.total,payments:appPmts});
           }
+          // If both empty → no-op
         }
-        if(autoAdded>0||autoUpdated>0){
-          console.log("Sheet sync: +"+autoAdded+" new, ~"+autoUpdated+" updated");
-        }
-      }catch(e){console.warn("Sheet sync error:",e.message);}
+      }catch(e){}
     };
-    pull();
-    const id=setInterval(pull,30000); // every 30 s — 10 s was too aggressive
-    return()=>{active=false;clearInterval(id);};
-  },[firm]); // ← only re-run when firm changes, NOT when disp changes
+    pull(); // run immediately on mount
+    const id=setInterval(pull,10000); // every 10 seconds
+    return()=>clearInterval(id);
+  },[firm,disp]);
 
   function startEdit(r){
     setEditId(r._id);
@@ -2601,18 +2542,13 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     const pmts=[...(entry.payments||[]),newP];
     const rcvd=pmts.reduce((a,p)=>a+(+p.amount||0),0);
     const status=calcPmt(rcvd,entry.total);
-    // 1. Update Firebase immediately for instant UI
     await dbUpdate(firm,"dispatch",entry._id,{...entry,payments:pmts,amountReceived:rcvd,paymentStatus:status});
     setPmtForm({date:today(),amount:"",note:""});
-    toast2("Payment of ₹"+fmt(+pmtForm.amount)+" recorded");
-    // 2. Sync to Google Sheet (instalments + summary)
+    toast2("Payment of Rs"+fmt(+pmtForm.amount)+" recorded");
     gsPost({action:"syncInstalments",firm:FIRMS[firm].name,challanNo:entry.challanNo,
       customer:entry.customer,designNo:entry.designNo,challanDate:entry.date,
       billTotal:entry.total,payments:pmts})
-      .then(r=>{
-        if(r.ok) toast2("Sheet: "+r.synced+" instalment"+(r.synced!==1?"s":"")+" synced");
-        else toast2("Sheet sync: "+(r.error||"?"),"err");
-      });
+      .then(r=>r.ok?toast2("Sheet: "+r.synced+" instalment"+(r.synced!==1?"s":"")+" synced"):toast2("Sheet: "+(r.error||"?"),"err"));
     gsPost({action:"updatePayment",firm:FIRMS[firm].name,challanNo:entry.challanNo,
       amountReceived:rcvd,paymentStatus:status,paymentReceived:rcvd});
   }
@@ -2624,11 +2560,9 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     const status=calcPmt(rcvd,entry.total);
     await dbUpdate(firm,"dispatch",entry._id,{...entry,payments:pmts,amountReceived:rcvd,paymentStatus:status});
     toast2("Instalment removed");
-    // Sync deletion to sheet
     gsPost({action:"syncInstalments",firm:FIRMS[firm].name,challanNo:entry.challanNo,
       customer:entry.customer,designNo:entry.designNo,challanDate:entry.date,
-      billTotal:entry.total,payments:pmts})
-      .then(r=>r.ok?toast2("Sheet updated: "+(pmts.length)+" instalment"+(pmts.length!==1?"s":"")+" remaining"):null);
+      billTotal:entry.total,payments:pmts});
     gsPost({action:"updatePayment",firm:FIRMS[firm].name,challanNo:entry.challanNo,
       amountReceived:rcvd,paymentStatus:status,paymentReceived:rcvd});
   }
@@ -2656,8 +2590,8 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         // Build payments from instalment columns
         const shPmts=[];
         for(let i=1;i<=5;i++){const dt=se["i"+i+"date"],amt=+se["i"+i+"amt"]||0;
-          if(amt>0)shPmts.push({id:"sh_"+se.challan+"_"+i,date:parseSheetDate(dt)||today(),amount:amt,note:"From Sheet"});}
-        const mapped={date:parseSheetDate(se.date)||"",
+          if(amt>0)shPmts.push({id:"sh_"+se.challan+"_"+i,date:dt?new Date(dt).toISOString().slice(0,10):today(),amount:amt,note:"From Sheet"});}
+        const mapped={date:se.date?new Date(se.date).toISOString().slice(0,10):"",
           challanNo:se.challan||"",customer:se.party||"",designNo:se.quality||"",
           meters:+se.meters||0,taka:+se.taka||0,rate:+se.rate||0,deliveryPlace:se.delivery||"",
           lotNo:se.lot||"",discountPct:+se.disc||0,taxable:+se.taxable||0,discAmt:+se.discAmt||0,
@@ -2670,7 +2604,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
               payments:shPmts.length>0?shPmts:(ex.payments||[])});updated++;
           }
         } else {
-          await dbs(firm,"dispatch",uid(),{...mapped,payments:shPmts});added++;
+          await dbs(firm,"dispatch",uid(),{...mapped,payments:shPmts.length>0?shPmts:[]});added++;
         }
       }
       toast2("Done: "+added+" new, "+updated+" updated");
@@ -2707,17 +2641,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
           h("button",{className:"btn btn-sm",style:{background:"#1565C0",color:"#fff"},onClick:pushAll,disabled:syncing},"⬆ Push all to Sheet"),
           h("a",{href:"https://1drv.ms/x/c/d88fff87125c45ba/IQBHbh44Es-5TaSA3xJ9dBXWAZzsreKVvcAwF5NgCR-hNWg",target:"_blank",className:"btn btn-sm"},"📎 OneDrive"),
           h("input",{type:"file",accept:".xlsx,.xls,.csv",ref:impRef,style:{display:"none"},onChange:onExcelFile}),
-          h("button",{className:"btn btn-sm btn-p",onClick:()=>impRef.current.click()},"⬆ Upload Excel"),
-          h("button",{className:"btn btn-sm",style:{background:"#7B1FA2",color:"#fff"},
-            title:"Restores Total Rcvd / Balance / Payment Status formulas in the Google Sheet if they were accidentally wiped",
-            onClick:async()=>{
-              try{
-                const r=await fetch(getGsUrl()+"?action=repairFormulas");
-                const j=await r.json();
-                toast2(j.ok?"✅ Sheet formulas repaired!":"Repair failed: "+(j.error||"?"),j.ok?"ok":"err");
-              }catch(e){toast2("Repair error: "+e.message,"err");}
-            }
-          },"🔧 Repair Sheet")
+          h("button",{className:"btn btn-sm btn-p",onClick:()=>impRef.current.click()},"⬆ Upload Excel")
         )
       ),
       // ── Google Script URL editor ──
