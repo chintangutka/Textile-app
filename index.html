@@ -2386,19 +2386,22 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
       .catch(()=>setSheetErr(true));
   },[]);
 
-  // Auto-sync: silent background pull every 60 seconds
+  // Keep ref to latest disp — prevents infinite re-trigger when Firestore updates
+  const dispRef=React.useRef(disp);
+  React.useEffect(()=>{dispRef.current=disp;},[disp]);
+
   useEffect(()=>{
+    let syncing=false;
     const pull=async()=>{
+      if(syncing)return; syncing=true;
       try{
         const res=await fetch(getGsUrl()+"?action=data&firm="+encodeURIComponent(FIRMS[firm].name));
-        const j=await res.json();if(!j.ok)return;
+        const j=await res.json();if(!j.ok){syncing=false;return;}
+        const cur=dispRef.current;
         for(const se of j.entries||[]){
-          const ex=disp.find(d=>d.challanNo&&String(d.challanNo)===String(se.challan));
+          const ex=cur.find(d=>d.challanNo&&String(d.challanNo)===String(se.challan));
           if(!ex)continue;
-          const shRcvd=+se.amtRcvd||0;
-          const appRcvd=+ex.amountReceived||0;
-          const appPmts=ex.payments||[];
-          // Read sheet instalment columns → shPmts
+          const shRcvd=+se.amtRcvd||0,appRcvd=+ex.amountReceived||0,appPmts=ex.payments||[];
           const shPmts=[];
           for(let i=1;i<=5;i++){
             const amt=+se["i"+i+"amt"]||0;
@@ -2410,28 +2413,24 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
             }
           }
           if(shPmts.length>0){
-            // SHEET → APP: sheet has data, check if it differs from app
-            const differs=shPmts.length!==appPmts.length
-              ||Math.abs(shRcvd-appRcvd)>0.01
+            const differs=shPmts.length!==appPmts.length||Math.abs(shRcvd-appRcvd)>0.01
               ||shPmts.some((p,i)=>{const e=appPmts[i];return !e||p.date!==e.date||Math.abs(p.amount-e.amount)>0.01;});
-            if(differs){
-              await dbUpdate(firm,"dispatch",ex._id,{...ex,
-                amountReceived:shRcvd,paymentStatus:calcPmt(shRcvd,ex.total),payments:shPmts});
-            }
+            if(differs)await dbUpdate(firm,"dispatch",ex._id,{...ex,
+              amountReceived:shRcvd,paymentStatus:calcPmt(shRcvd,ex.total),payments:shPmts});
           } else if(appPmts.length>0&&appRcvd>0.01){
-            // APP → SHEET: app has data but sheet empty → push to sheet
             gsPost({action:"syncInstalments",firm:FIRMS[firm].name,challanNo:ex.challanNo,
               customer:ex.customer,designNo:ex.designNo,challanDate:ex.date,
               billTotal:ex.total,payments:appPmts});
           }
-          // If both empty → no-op
         }
       }catch(e){}
+      syncing=false;
     };
-    pull(); // run immediately on mount
-    const id=setInterval(pull,10000); // every 10 seconds
+    pull();
+    const id=setInterval(pull,10000);
     return()=>clearInterval(id);
-  },[firm,disp]);
+  },[firm]); // ONLY firm — disp via ref avoids infinite loop
+
 
   function startEdit(r){
     setEditId(r._id);
