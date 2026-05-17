@@ -2414,7 +2414,8 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         }
       }catch(e){}
     };
-    const id=setInterval(pull,60000);
+    pull(); // run immediately on mount
+    const id=setInterval(pull,10000); // every 10 seconds
     return()=>clearInterval(id);
   },[firm,disp]);
 
