@@ -2403,7 +2403,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
           if(!ex)continue;
           const shRcvd=+se.amtRcvd||0,appRcvd=+ex.amountReceived||0,appPmts=ex.payments||[];
           const shPmts=[];
-          for(let i=1;i<=5;i++){
+          for(let i=1;i<=3;i++){
             const amt=+se["i"+i+"amt"]||0;
             if(amt>0){
               let d=se["i"+i+"date"]||"";
@@ -2537,8 +2537,17 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
 
   async function addPayment(entry){
     if(!pmtForm.amount||+pmtForm.amount<=0){toast2("Enter amount","err");return;}
+    const curPmts=entry.payments||[];
+    if(curPmts.length>=3){toast2("Max 3 instalments allowed","err");return;}
+    // Backdated check: new date must be >= last instalment date
+    if(curPmts.length>0){
+      const lastDate=curPmts.slice().sort((a,b)=>(a.date||"").localeCompare(b.date||"")).slice(-1)[0].date||"";
+      if(pmtForm.date&&lastDate&&pmtForm.date<lastDate){
+        toast2("Date cannot be before last instalment ("+fmtD(lastDate)+")","err");return;
+      }
+    }
     const newP={id:uid(),date:pmtForm.date||today(),amount:+pmtForm.amount,note:pmtForm.note||""};
-    const pmts=[...(entry.payments||[]),newP];
+    const pmts=[...(entry.payments||[]),newP].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
     const rcvd=pmts.reduce((a,p)=>a+(+p.amount||0),0);
     const status=calcPmt(rcvd,entry.total);
     await dbUpdate(firm,"dispatch",entry._id,{...entry,payments:pmts,amountReceived:rcvd,paymentStatus:status});
@@ -2615,7 +2624,11 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
   const tx=(+f.meters||0)*(+f.rate||0);
   const da=tx*(+f.discountPct||0)/100;
   const ad=tx-da,sg=ad*0.025,cg=ad*0.025,tot=ad+sg+cg;
-  const avDes=[...new Set(fab.map(r=>r.designNo).filter(Boolean))];
+  const avDes=[...new Set(fab.map(r=>r.designNo).filter(Boolean))].filter(dn=>{
+    const fabM=fab.filter(r=>r.designNo===dn).reduce((a,r)=>a+(+r.meters||0),0);
+    const dispM=disp.filter(r=>r.designNo===dn&&r._id!==editId).reduce((a,r)=>a+(+r.meters||0),0);
+    return fabM<=0||dispM<fabM-0.01; // show if has undispatched meters or no fabric data
+  });
   const customers=[...new Set(disp.map(r=>r.customer).filter(Boolean))];
   const filt=[...disp].reverse().filter(r=>{
     const q=srch.toLowerCase();
@@ -2708,8 +2721,12 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         FL("Design No. *",h(AddSel,{val:f.designNo,fn:v=>s("designNo",v),opts:avDes,placeholder:"Select design…"}))
       ),
       h("div",{className:"fr c2"},
-        FL("Delivery Place",h("input",{value:f.deliveryPlace,onChange:e=>s("deliveryPlace",e.target.value)})),
-        FL("Transporter",h("input",{value:f.transporter,onChange:e=>s("transporter",e.target.value)}))
+        FL("Delivery Place",h(AddSel,{val:f.deliveryPlace,fn:v=>s("deliveryPlace",v),
+          opts:M.deliveryPlaces||[],placeholder:"Select delivery place…",
+          onAdd:v=>updM("deliveryPlaces",[...(M.deliveryPlaces||[]),v])})),
+        FL("Transporter",h(AddSel,{val:f.transporter,fn:v=>s("transporter",v),
+          opts:M.transporters||[],placeholder:"Select transporter…",
+          onAdd:v=>updM("transporters",[...(M.transporters||[]),v])}))
       ),
       h("div",{className:"fr c3"},
         FL("Meters *",h("input",{type:"number",value:f.meters,onChange:e=>s("meters",e.target.value)})),
