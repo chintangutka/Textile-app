@@ -2429,14 +2429,37 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
             }
           }
           if(shPmts.length>0){
-            const differs=shPmts.length!==appPmts.length||Math.abs(shRcvd-appRcvd)>0.01
+            const pmtDiffers=shPmts.length!==appPmts.length||Math.abs(shRcvd-appRcvd)>0.01
               ||shPmts.some((p,i)=>{const e=appPmts[i];return !e||p.date!==e.date||Math.abs(p.amount-e.amount)>0.01;});
-            if(differs)await dbUpdate(firm,"dispatch",ex._id,{...ex,
+            if(pmtDiffers)await dbUpdate(firm,"dispatch",ex._id,{...ex,
               amountReceived:shRcvd,paymentStatus:calcPmt(shRcvd,ex.total),payments:shPmts});
           } else if(appPmts.length>0&&appRcvd>0.01){
             gsPost({action:"syncInstalments",firm:FIRMS[firm].name,challanNo:ex.challanNo,
               customer:ex.customer,designNo:ex.designNo,challanDate:ex.date,
               billTotal:ex.total,payments:appPmts});
+          }
+          // Also sync core fields: if sheet rate/meters/delivery etc changed → update app
+          const shTotal=+se.total||0, exTotal=+ex.total||0;
+          const shRate=+se.rate||0, exRate=+ex.rate||0;
+          const shMeters=+se.meters||0, exMeters=+ex.meters||0;
+          const shDlvr=se.delivery||"", exDlvr=[ex.deliveryPlace,ex.transporter].filter(Boolean).join(" / ");
+          const coreChanged=Math.abs(shTotal-exTotal)>0.01||Math.abs(shRate-exRate)>0.01
+            ||Math.abs(shMeters-exMeters)>0.01||(shDlvr&&shDlvr!==exDlvr)
+            ||(se.party&&se.party!==ex.customer)||(se.lot&&se.lot!==ex.lotNo);
+          if(coreChanged){
+            const dlvrParts=(shDlvr||"").split(" / ");
+            await dbUpdate(firm,"dispatch",ex._id,{...ex,
+              meters:shMeters||ex.meters,rate:shRate||ex.rate,
+              total:shTotal||ex.total,taxable:+se.taxable||ex.taxable,
+              sgst:+se.sgst||ex.sgst,cgst:+se.cgst||ex.cgst,
+              discountPct:+se.disc||ex.discountPct,
+              customer:se.party||ex.customer,lotNo:se.lot||ex.lotNo,
+              deliveryPlace:dlvrParts[0]||ex.deliveryPlace,
+              transporter:dlvrParts.slice(1).join(" / ")||ex.transporter,
+              challanNo:se.challan||ex.challanNo,designNo:se.quality||ex.designNo,
+              date:se.date?isoDate(se.date):ex.date,
+              paymentStatus:calcPmt(shRcvd||appRcvd,shTotal||exTotal)
+            });
           }
         }
       }catch(e){}
@@ -2591,7 +2614,13 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
       amountReceived:rcvd,paymentStatus:status,paymentReceived:rcvd});
   }
 
-  async function delEntry(id){if(!confirm("Delete this entry?"))return;await dbd(firm,"dispatch",id);setSelEntry(null);}
+  async function delEntry(id){
+    if(!confirm("Delete this entry?"))return;
+    const entry=disp.find(d=>d._id===id);
+    await dbd(firm,"dispatch",id);
+    setSelEntry(null);
+    if(entry)gsPost({action:"deleteEntry",firm:FIRMS[firm].name,challanNo:entry.challanNo});
+  }
 
   async function pushAll(){
     if(!confirm("Push all "+disp.length+" entries to Google Sheet?"))return;
