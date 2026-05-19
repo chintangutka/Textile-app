@@ -2417,7 +2417,23 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         const cur=dispRef.current;
         for(const se of j.entries||[]){
           const ex=cur.find(d=>d.challanNo&&String(d.challanNo)===String(se.challan));
-          if(!ex)continue;
+          if(!ex){
+            // Entry exists in sheet for this firm but not in Firestore → add it (moved from other firm)
+            if(se.meters&&+se.meters>0&&se.party){
+              const shRcvd2=+se.amtRcvd||0;
+              const dlvParts=(se.delivery||"").split(" / ");
+              await dbs(firm,"dispatch",uid(),{
+                date:isoDate(se.date)||today(),challanNo:se.challan||"",customer:se.party||"",
+                designNo:se.quality||"",meters:+se.meters||0,taka:+se.taka||0,rate:+se.rate||0,
+                deliveryPlace:dlvParts[0]||"",transporter:dlvParts.slice(1).join(" / ")||"",
+                discountPct:+se.disc||0,lotNo:se.lot||"",remarks:se.remarks||"",
+                taxable:+se.taxable||0,discAmt:+se.discAmt||0,afterDisc:+se.afterDisc||0,
+                sgst:+se.sgst||0,cgst:+se.cgst||0,total:+se.total||0,
+                amountReceived:shRcvd2,paymentStatus:calcPmt(shRcvd2,+se.total||0),payments:[]
+              });
+            }
+            continue;
+          }
           const shRcvd=+se.amtRcvd||0,appRcvd=+ex.amountReceived||0,appPmts=ex.payments||[];
           const shPmts=[];
           for(let i=1;i<=3;i++){
