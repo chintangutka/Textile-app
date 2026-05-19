@@ -176,7 +176,24 @@ const {useState,useEffect,useMemo}=React,h=React.createElement;
 const uid=()=>Math.random().toString(36).substr(2,9);
 const today=()=>new Date().toISOString().split("T")[0];
 const fmt=n=>Number(n||0).toLocaleString("en-IN");
-const fmtD=d=>{if(!d)return"";const[y,m,da]=d.split("-");return da+"-"+"Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec".split(",")[+m-1]+"-"+y};
+const MMAP={Jan:"01",Feb:"02",Mar:"03",Apr:"04",May:"05",Jun:"06",Jul:"07",Aug:"08",Sep:"09",Oct:"10",Nov:"11",Dec:"12"};
+// Convert any date string → ISO yyyy-mm-dd
+function isoDate(d){
+  if(!d)return"";
+  if(typeof d==="object"&&d.toISOString)return d.toISOString().slice(0,10);
+  const s=String(d).trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s; // already ISO
+  if(s.includes("T"))return s.slice(0,10); // ISO with time
+  // DD-Mon-YYYY e.g. "22-May-2026"
+  const m1=s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+  if(m1)return m1[3]+"-"+(MMAP[m1[2]]||"01")+"-"+m1[1].padStart(2,"0");
+  // DD/MM/YYYY
+  const m2=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(m2)return m2[3]+"-"+m2[2].padStart(2,"0")+"-"+m2[1].padStart(2,"0");
+  try{const dt=new Date(s);if(!isNaN(dt))return dt.toISOString().slice(0,10);}catch(e){}
+  return s;
+}
+const fmtD=d=>{const iso=isoDate(d);if(!iso||iso.length<10)return d||"";const[y,m,da]=iso.split("-");return da+"-"+"Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec".split(",")[+m-1]+"-"+y;};
 const daysAgo=d=>{if(!d)return 0;return Math.floor((Date.now()-new Date(d))/(864e5))};
 const GS_URL_DEFAULT="https://script.google.com/macros/s/AKfycbybyTUh2FdoAcE_50ygCCP7FtMKyRbTUalbYQjSajAWSr9at1NAk1BOzPnXlRrYdrlG_w/exec";
 function getGsUrl(){return localStorage.getItem("tsm_gs_url")||GS_URL_DEFAULT;}
@@ -2407,8 +2424,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
             const amt=+se["i"+i+"amt"]||0;
             if(amt>0){
               let d=se["i"+i+"date"]||"";
-              if(d instanceof Date)d=d.toISOString().slice(0,10);
-              else if(d&&typeof d==="string"&&d.includes("T"))d=d.slice(0,10);
+              d=isoDate(d); // normalize any format: DD-Mon-YYYY, DD/MM/YYYY, ISO, etc.
               shPmts.push({id:"sh_"+i,date:d||today(),amount:amt,note:"From Sheet"});
             }
           }
