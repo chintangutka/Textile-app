@@ -2843,6 +2843,20 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     setSyncing(false);
   }
 
+  // OneDrive Excel pull handler
+  async function handleOdPull(rows){
+    let added=0,updated=0;
+    for(const row of rows){
+      if(!row.challanNo)continue;
+      const ex=disp.find(d=>d.challanNo&&String(d.challanNo)===String(row.challanNo));
+      const rcvd=+row.amountReceived||0;
+      const mapped={...row,paymentStatus:calcPmt(rcvd,+row.total||0)};
+      if(ex){await dbUpdate(firm,"dispatch",ex._id,{...ex,...mapped});updated++;}
+      else{await dbs(firm,"dispatch",uid(),mapped);added++;}
+    }
+    toast2("Excel: "+added+" added, "+updated+" updated");
+  }
+
   // Computed
   const tx=(+f.meters||0)*(+f.rate||0);
   const da=tx*(+f.discountPct||0)/100;
@@ -2874,7 +2888,8 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
           h("button",{className:"btn btn-sm",onClick:pullFromSheet,disabled:syncing},syncing?"⏳":"🔄 Pull from Sheet"),
           h("button",{className:"btn btn-sm",style:{background:"#1565C0",color:"#fff"},onClick:pushAll,disabled:syncing},"⬆ Push all to Sheet"),
-          h("a",{href:"https://onedrive.live.com",target:"_blank",className:"btn btn-sm"},"☁ OneDrive"),
+          h("a",{href:"https://1drv.ms/x/c/d88fff87125c45ba/IQBHbh44Es-5TaSA3xJ9dBXWAZzsreKVvcAwF5NgCR-hNWg",target:"_blank",className:"btn btn-sm"},"📂 Open Excel"),
+          h(OdSync,{disp:filt,firm,onPull:handleOdPull}),
           h("input",{type:"file",accept:".xlsx,.xls,.csv",ref:impRef,style:{display:"none"},onChange:onExcelFile}),
           h("button",{className:"btn btn-sm btn-p",onClick:()=>impRef.current.click()},"⬆ Upload Excel")
         )
@@ -3202,6 +3217,140 @@ function AddPartyInline({firm,M,updM,onAdded,defaultType}){
 function TH(cols){return cols.map(c=>h("th",{key:c},c))}
 function Td(child,cls=""){return h("td",{className:cls},child)}
 function Em(msg){return h("div",{className:"empty"},h("div",{className:"ei"},"📋"),h("p",null,msg))}
+
+// ── OneDrive Excel Sync ──────────────────────────────────
+const OD_FILE_URL="https://1drv.ms/x/c/d88fff87125c45ba/IQBHbh44Es-5TaSA3xJ9dBXWAZzsreKVvcAwF5NgCR-hNWg";
+const OD_CLIENT_ID="85ca9381-da7a-4696-9a8e-35578907c7f5";
+const OD_SCOPES=["Files.ReadWrite","User.Read"];
+let _odApp=null;
+
+function odLoadMsal(){
+  return new Promise((res,rej)=>{
+    if(window.msal){res();return;}
+    const s=document.createElement("script");
+    s.src="https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js";
+    s.onload=res;s.onerror=()=>rej(new Error("Could not load Microsoft login library"));
+    document.head.appendChild(s);
+  });
+}
+async function odGetApp(){
+  await odLoadMsal();
+  if(!_odApp)_odApp=new msal.PublicClientApplication({
+    auth:{clientId:OD_CLIENT_ID,authority:"https://login.microsoftonline.com/common",
+      redirectUri:"https://chintangutka.github.io/Textile-app/"},
+    cache:{cacheLocation:"localStorage",storeAuthStateInCookie:true}
+  });
+  return _odApp;
+}
+async function odToken(){
+  const app=await odGetApp();
+  const accts=app.getAllAccounts();
+  if(accts.length>0){
+    try{const r=await app.acquireTokenSilent({scopes:OD_SCOPES,account:accts[0]});return r.accessToken;}catch(e){}
+  }
+  const r=await app.loginPopup({scopes:OD_SCOPES});
+  app.setActiveAccount(r.account);
+  const t=await app.acquireTokenSilent({scopes:OD_SCOPES,account:r.account});
+  return t.accessToken;
+}
+async function odSignOut(){
+  const app=await odGetApp();
+  const a=app.getAllAccounts();
+  if(a.length>0)await app.logoutPopup({account:a[0]});
+}
+function odUser(){
+  try{if(!window.msal||!_odApp)return null;const a=_odApp.getAllAccounts();return a.length>0?a[0]:null;}
+  catch(e){return null;}
+}
+async function odFileItem(tok){
+  const encoded="u!"+btoa(OD_FILE_URL).replace(/=+$/,"").replace(/\+/g,"-").replace(/\//g,"_");
+  const r=await fetch("https://graph.microsoft.com/v1.0/shares/"+encoded+"/driveItem",
+    {headers:{Authorization:"Bearer "+tok}});
+  if(!r.ok)throw new Error("Cannot access Excel file ("+r.status+"). Sign in with the account that owns this file.");
+  return await r.json();
+}
+const OD_HEADERS=["Date","Challan","Customer","Design","Meters","Taka","Rate","Lot","Delivery","Transporter","Taxable","Disc%","DiscAmt","AfterDisc","SGST","CGST","Total","I1Date","I1Amt","I2Date","I2Amt","I3Date","I3Amt","Rcvd","Balance","Status","Remarks"];
+async function odPush(disp,tok){
+  const item=await odFileItem(tok);
+  const dId=item.parentReference.driveId,iId=item.id;
+  const ws="Fabric Dispatch";
+  const rows=disp.map(r=>{
+    const p=(r.payments||[]).sort((a,b)=>a.date>b.date?1:-1);
+    const rcvd=+r.amountReceived||0,bal=Math.max(0,(+r.total||0)-rcvd);
+    return[fmtD(r.date),r.challanNo||"",r.customer||"",r.designNo||"",
+      +r.meters||0,+r.taka||0,+r.rate||0,r.lotNo||"",r.deliveryPlace||"",r.transporter||"",
+      +r.taxable||0,+r.discountPct||0,+r.discAmt||0,+r.afterDisc||0,+r.sgst||0,+r.cgst||0,+r.total||0,
+      p[0]?fmtD(p[0].date):"",p[0]?+p[0].amount:0,
+      p[1]?fmtD(p[1].date):"",p[1]?+p[1].amount:0,
+      p[2]?fmtD(p[2].date):"",p[2]?+p[2].amount:0,
+      rcvd,bal,r.paymentStatus||"",r.remarks||""];
+  });
+  const vals=[OD_HEADERS,...rows];
+  const addr="A1:AA"+vals.length;
+  let r2=await fetch("https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId+"/workbook/worksheets('"+encodeURIComponent(ws)+"')/range(address='"+addr+"')",
+    {method:"PATCH",headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},body:JSON.stringify({values:vals})});
+  if(!r2.ok){
+    // Sheet may not exist — create it
+    await fetch("https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId+"/workbook/worksheets/add",
+      {method:"POST",headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},body:JSON.stringify({name:ws})});
+    r2=await fetch("https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId+"/workbook/worksheets('"+encodeURIComponent(ws)+"')/range(address='"+addr+"')",
+      {method:"PATCH",headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},body:JSON.stringify({values:vals})});
+    if(!r2.ok)throw new Error("Write failed: "+r2.status);
+  }
+  return rows.length;
+}
+async function odPull(tok){
+  const item=await odFileItem(tok);
+  const dId=item.parentReference.driveId,iId=item.id;
+  const ws="Fabric Dispatch";
+  const r=await fetch("https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId+"/workbook/worksheets('"+encodeURIComponent(ws)+"')/usedRange",
+    {headers:{Authorization:"Bearer "+tok}});
+  if(!r.ok)throw new Error("Cannot read sheet: "+r.status);
+  const d=await r.json();
+  const[,,...rows]=d.values;
+  return rows.filter(r=>r[1]).map(r=>({
+    date:isoDate(String(r[0]||""))||today(),challanNo:String(r[1]||""),customer:r[2]||"",
+    designNo:r[3]||"",meters:+r[4]||0,taka:+r[5]||0,rate:+r[6]||0,lotNo:r[7]||"",
+    deliveryPlace:r[8]||"",transporter:r[9]||"",taxable:+r[10]||0,discountPct:+r[11]||0,
+    discAmt:+r[12]||0,afterDisc:+r[13]||0,sgst:+r[14]||0,cgst:+r[15]||0,total:+r[16]||0,
+    payments:[r[17]&&+r[18]>0?{id:uid(),date:isoDate(String(r[17]))||today(),amount:+r[18],note:"Excel"}:null,
+      r[19]&&+r[20]>0?{id:uid(),date:isoDate(String(r[19]))||today(),amount:+r[20],note:"Excel"}:null,
+      r[21]&&+r[22]>0?{id:uid(),date:isoDate(String(r[21]))||today(),amount:+r[22],note:"Excel"}:null].filter(Boolean),
+    amountReceived:+r[23]||0,paymentStatus:r[25]||"Pending",remarks:r[26]||""
+  }));
+}
+
+function OdSync({disp,firm,onPull}){
+  const[user,setUser]=useState(null);
+  const[busy,setBusy]=useState("");
+  const[msg,setMsg]=useState("");
+  useEffect(()=>{try{setUser(odUser());}catch(e){}},[]);
+  async function signIn(){setBusy("login");setMsg("");
+    try{await odToken();setUser(odUser());}
+    catch(e){setMsg("Sign-in failed: "+e.message);}
+    setBusy("");}
+  async function push(){setBusy("push");setMsg("");
+    try{const tok=await odToken();const n=await odPush(disp,tok);setMsg("✅ "+n+" rows → Excel");}
+    catch(e){setMsg("❌ "+e.message);}
+    setBusy("");}
+  async function pull(){setBusy("pull");setMsg("");
+    try{const tok=await odToken();const rows=await odPull(tok);await onPull(rows);setMsg("✅ "+rows.length+" rows ← Excel");}
+    catch(e){setMsg("❌ "+e.message);}
+    setBusy("");}
+  async function out(){try{await odSignOut();setUser(null);setMsg("");}catch(e){}}
+  return h("div",{style:{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap",marginTop:4}},
+    !user&&h("button",{className:"btn btn-sm",onClick:signIn,disabled:busy==="login"},
+      busy==="login"?"⏳ Signing in…":"☁ Sign in to OneDrive"),
+    user&&h("button",{className:"btn btn-sm",style:{background:"#0078D4",color:"#fff"},
+      onClick:push,disabled:!!busy},busy==="push"?"⏳ Pushing…":"☁ Push to Excel"),
+    user&&h("button",{className:"btn btn-sm",onClick:pull,disabled:!!busy},
+      busy==="pull"?"⏳ Pulling…":"⬇ Pull from Excel"),
+    user&&h("span",{style:{fontSize:11,color:"var(--mu)",maxWidth:120,overflow:"hidden",
+      textOverflow:"ellipsis",whiteSpace:"nowrap"},title:user.username},user.name||user.username),
+    user&&h("button",{className:"btn btn-sm",style:{fontSize:10,padding:"2px 6px"},onClick:out},"✕"),
+    msg&&h("span",{style:{fontSize:11,color:msg.startsWith("✅")?"var(--ok)":"var(--er)",marginLeft:4}},msg)
+  );
+}
 
 if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
 // Show error visibly even if React/Firebase fails to load
