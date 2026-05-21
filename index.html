@@ -165,6 +165,7 @@ tr:hover td{background:#FDFAF5}
 </style>
 </head>
 <body>
+<div id="js-test" style="padding:20px;font-size:16px;color:red;font-family:monospace;background:white">⚠ JavaScript is not running — check browser console</div>
 <div id="r"></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -172,80 +173,22 @@ tr:hover td{background:#FDFAF5}
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script>
-
+document.getElementById("js-test").style.display="none";
+// Error handler first
+window.onerror=function(msg,src,line){
+  var d=document.getElementById("r");
+  if(d)d.innerHTML="<div style='padding:24px;font-family:monospace;font-size:13px;color:#c00;background:#fff'>Error (line "+line+"): "+msg+"</div>";
+  return true;
+};
+if(typeof React==="undefined"||typeof firebase==="undefined"){
+  document.getElementById("r").innerHTML="<div style='padding:24px;font-family:monospace;color:#c00;background:#fff'>Libraries not loaded - check internet connection</div>";
+  throw new Error("Libraries not loaded");
+}
 const {useState,useEffect,useMemo}=React,h=React.createElement;
 const uid=()=>Math.random().toString(36).substr(2,9);
 const today=()=>new Date().toISOString().split("T")[0];
 const fmt=n=>Number(n||0).toLocaleString("en-IN");
 const MMAP={Jan:"01",Feb:"02",Mar:"03",Apr:"04",May:"05",Jun:"06",Jul:"07",Aug:"08",Sep:"09",Oct:"10",Nov:"11",Dec:"12"};
-// ── Microsoft OneDrive Integration (lazy-loaded) ────────
-const msalConfig = {
-  auth: {
-    clientId: "85ca9381-da7a-4696-9a8e-35578907c7f5",
-    authority: "https://login.microsoftonline.com/common",
-    redirectUri: "https://chintangutka.github.io/Textile-app/"
-  },
-  cache: { cacheLocation: "localStorage", storeAuthStateInCookie: true }
-};
-const OD_SCOPES = ["Files.ReadWrite", "User.Read"];
-let _msalApp = null;
-
-function loadMsal() {
-  return new Promise((resolve, reject) => {
-    if (window.msal) { resolve(); return; }
-    const s = document.createElement("script");
-    s.src = "https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js";
-    s.onload = resolve;
-    s.onerror = () => reject(new Error("Failed to load MSAL"));
-    document.head.appendChild(s);
-  });
-}
-function getMsal() {
-  if (!_msalApp) _msalApp = new msal.PublicClientApplication(msalConfig);
-  return _msalApp;
-}
-async function odLogin() {
-  await loadMsal();
-  const app = getMsal();
-  try {
-    const accounts = app.getAllAccounts();
-    if (accounts.length > 0) {
-      const res = await app.acquireTokenSilent({ scopes: OD_SCOPES, account: accounts[0] });
-      return res.accessToken;
-    }
-  } catch(e) {}
-  const res = await app.loginPopup({ scopes: OD_SCOPES });
-  app.setActiveAccount(res.account);
-  const tok = await app.acquireTokenSilent({ scopes: OD_SCOPES, account: res.account });
-  return tok.accessToken;
-}
-async function odLogout() {
-  await loadMsal();
-  const app = getMsal();
-  const accounts = app.getAllAccounts();
-  if (accounts.length > 0) await app.logoutPopup({ account: accounts[0] });
-}
-function odGetUser() {
-  try {
-    if (!window.msal) return null;
-    const a = getMsal().getAllAccounts();
-    return a.length > 0 ? a[0] : null;
-  } catch(e) { return null; }
-}
-async function odUploadExcel(filename, workbook) {
-  const token = await odLogin();
-  const wbData = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-  const blob = new Blob([wbData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const res = await fetch(`https://graph.microsoft.com/v1.0/me/drive/root:/${filename}:/content`, {
-    method: "PUT",
-    headers: { Authorization: "Bearer " + token, "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-    body: blob
-  });
-  if (!res.ok) throw new Error("Upload failed: " + res.status);
-  return await res.json();
-}
-
-// Convert any date string → ISO yyyy-mm-dd
 function isoDate(d){
   if(!d)return"";
   if(typeof d==="object"&&d.toISOString)return d.toISOString().slice(0,10);
@@ -757,7 +700,8 @@ function PDbl({firm,M,dblg,yBal,toast2,fname}){
   );
 }
 
-
+// ── YARN INWARD ──────────────────────────────────────────
+function PInw({firm,M,inw,parties,toast2,updM,fname}){
   const[editId,setEditId]=useState(null);
   const ini={date:today(),mill:"",supplier:"",destination:"",yarnType:"",lotNo:"",bags:"",kgPerBag:100,totalKg:"",ratePerKg:"",remarks:""};
   const startEdit=(r)=>{setEditId(r._id);sf({date:r.date||today(),mill:r.mill||"",supplier:r.supplier||"",destination:r.destination||r.godown||"",yarnType:r.yarnType||"",lotNo:r.lotNo||"",bags:r.bags||"",kgPerBag:r.kgPerBag||100,totalKg:r.totalKg||"",ratePerKg:r.ratePerKg||"",remarks:r.remarks||""})};
@@ -925,6 +869,7 @@ function PDbl({firm,M,dblg,yBal,toast2,fname}){
       ))
     )
   );
+}
 
 // ── ISSUE YARN ──
 function PIss({firm,M,parties,iss,inw,toast2,updM,fname,yBal}){
@@ -2530,40 +2475,6 @@ function PYarnLed({inw,M,fname}){
 // ── FABRIC DISPATCH / SALE ──
 // ── FABRIC DISPATCH / SALE ──
 // ── FABRIC DISPATCH / SALE ──
-// ── OneDrive Button ──────────────────────────────────────
-function OdBtn({disp,firm}){
-  const[user,setUser]=useState(null);
-  React.useEffect(()=>{ try{setUser(odGetUser());}catch(e){} },[]);
-  const[uploading,setUploading]=useState(false);
-  async function handleLogin(){
-    try{await odLogin();setUser(odGetUser());}catch(e){alert("Sign-in failed: "+e.message);}
-  }
-  async function handleLogout(){await odLogout();setUser(null);}
-  async function uploadToOneDrive(){
-    setUploading(true);
-    try{
-      const wb=XLSX.utils.book_new();
-      const rows=disp.map(r=>[fmtD(r.date),r.challanNo||"",r.customer,r.designNo,
-        r.meters,r.total,r.amountReceived||0,Math.max(0,(+r.total||0)-(+r.amountReceived||0)),
-        r.paymentStatus,r.deliveryPlace,r.transporter,r.remarks||""]);
-      const ws=XLSX.utils.aoa_to_sheet([
-        ["Date","Challan","Customer","Design","Meters","Total","Received","Pending","Status","Delivery","Transporter","Remarks"],
-        ...rows]);
-      XLSX.utils.book_append_sheet(wb,ws,"Fabric Dispatch");
-      const fname=firm.replace(/\s+/g,"_")+"_Dispatch_"+new Date().toISOString().slice(0,10)+".xlsx";
-      await odUploadExcel(fname,wb);
-      alert("✅ Uploaded: "+fname+"\n\nCheck your OneDrive root folder.");
-    }catch(e){alert("Upload failed: "+e.message);}
-    setUploading(false);
-  }
-  if(!user)return h("button",{className:"btn btn-sm",onClick:handleLogin},"☁ OneDrive");
-  return h("div",{style:{display:"flex",gap:4,alignItems:"center"}},
-    h("button",{className:"btn btn-sm",style:{background:"#0078D4",color:"#fff"},
-      onClick:uploadToOneDrive,disabled:uploading},uploading?"⏳…":"☁ Save to OneDrive"),
-    h("span",{style:{fontSize:10,color:"var(--mu)",maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},user.name||user.username||""),
-    h("button",{className:"btn btn-sm",style:{fontSize:10},onClick:handleLogout},"✕")
-  );
-}
 
 // ── Google Script URL Editor (persistent via localStorage) ──
 function GsUrlEditor(){
@@ -2963,7 +2874,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
           h("button",{className:"btn btn-sm",onClick:pullFromSheet,disabled:syncing},syncing?"⏳":"🔄 Pull from Sheet"),
           h("button",{className:"btn btn-sm",style:{background:"#1565C0",color:"#fff"},onClick:pushAll,disabled:syncing},"⬆ Push all to Sheet"),
-          h(OdBtn,{disp:filt,firm:FIRMS[firm].name}),
+          h("a",{href:"https://onedrive.live.com",target:"_blank",className:"btn btn-sm"},"☁ OneDrive"),
           h("input",{type:"file",accept:".xlsx,.xls,.csv",ref:impRef,style:{display:"none"},onChange:onExcelFile}),
           h("button",{className:"btn btn-sm btn-p",onClick:()=>impRef.current.click()},"⬆ Upload Excel")
         )
@@ -3293,7 +3204,18 @@ function Td(child,cls=""){return h("td",{className:cls},child)}
 function Em(msg){return h("div",{className:"empty"},h("div",{className:"ei"},"📋"),h("p",null,msg))}
 
 if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
-try{ReactDOM.render(h(Root),document.getElementById("r"));}catch(e){document.getElementById("r").innerHTML="<div style='padding:20px;color:red'>Error: "+e.message+"</div>";}
+// Show error visibly even if React/Firebase fails to load
+window.onerror=function(msg,src,line){
+  document.getElementById("r").innerHTML="<div style='padding:20px;font-family:monospace;color:red;background:#fff'><b>JS Error:</b> "+msg+"<br>Line: "+line+"</div>";
+  return true;
+};
+try{
+  if(typeof React==="undefined")throw new Error("React not loaded - check internet connection");
+  if(typeof firebase==="undefined")throw new Error("Firebase not loaded - check internet connection");
+  ReactDOM.render(h(Root),document.getElementById("r"));
+}catch(e){
+  document.getElementById("r").innerHTML="<div style='padding:20px;font-family:monospace;color:#c00;background:#fff'><b>Startup Error:</b><br>"+e.message+"</div>";
+}
 </script>
 </body>
 </html>
