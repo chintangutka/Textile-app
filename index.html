@@ -3269,67 +3269,110 @@ async function odFileItem(tok){
   if(!r.ok)throw new Error("Cannot access Excel file ("+r.status+"). Sign in with the account that owns this file.");
   return await r.json();
 }
-const OD_HEADERS=["Sr","Date","Firm","Party","Taka","Quality","Challan","Delivery & Transport","Lot","Meters","Rate","Taxable","Disc%","DiscAmt","AfterDisc","SGST","CGST","Total","I1Date","I1Amt","I2Date","I2Amt","I3Date","I3Amt","Rcvd","Balance","Status","Remarks"];
-const DATA_ROW=5;
+// ── OneDrive Excel Sync ──────────────────────────────────
+// Column layout matches GS All Entries (AC constants):
+// A:Sr B:Date C:Firm D:Party E:Taka F:Quality G:Challan H:Delivery I:Lot
+// J:Meters K:Rate L:Taxable M:Disc% N:DiscAmt O:AfterDisc P:SGST Q:CGST
+// R:Total S:I1Date T:I1Amt U:I2Date V:I2Amt W:I3Date X:I3Amt Y:Rcvd Z:Balance AA:Status AB:Remarks
+const OD_HDR=["Sr","Date","Firm","Party","Taka","Quality","Challan","Delivery & Transport","Lot","Meters","Rate","Taxable","Disc%","DiscAmt","AfterDisc","SGST 2.5%","CGST 2.5%","Total","I1Date","I1Amt","I2Date","I2Amt","I3Date","I3Amt","Rcvd","Balance","Status","Remarks"];
+const OD_DR=5; // DATA_ROW
+
 function odBuildRows(disp,firmName){
   return disp.map((r,i)=>{
+    const row=OD_DR+i;
     const p=(r.payments||[]).sort((a,b)=>a.date>b.date?1:-1);
-    const row=DATA_ROW+i;
-    return[i+1,fmtD(r.date),firmName,r.customer||"",+r.taka||0,r.designNo||"",r.challanNo||"",
-      (r.deliveryPlace||"")+(r.transporter?" / "+r.transporter:""),r.lotNo||"",+r.meters||0,+r.rate||0,
-      "=J"+row+"*K"+row,+r.discountPct||0,"=L"+row+"*M"+row+"/100","=L"+row+"-N"+row,
-      "=O"+row+"*0.025","=O"+row+"*0.025","=O"+row+"+P"+row+"+Q"+row,
-      p[0]?fmtD(p[0].date):"",p[0]?+p[0].amount:0,
-      p[1]?fmtD(p[1].date):"",p[1]?+p[1].amount:0,
-      p[2]?fmtD(p[2].date):"",p[2]?+p[2].amount:0,
-      "=IFERROR(T"+row+"+V"+row+"+X"+row+",0)",
-      "=IFERROR(R"+row+"-Y"+row+",0)",
-      "=IF(R"+row+'="","",IF(Y'+row+'<=0,"Pending",IF(Y'+row+'>=R'+row+'*0.999,"Received",IF(Y'+row+'>R'+row+'*1.001,"Excess","Partial"))))',
-      r.remarks||""];
+    // Calculated columns use formulas; raw inputs are values
+    return[
+      i+1,                                    // Sr
+      fmtD(r.date),                           // Date
+      firmName,                               // Firm
+      r.customer||"",                         // Party
+      +r.taka||0,                             // Taka
+      r.designNo||"",                         // Quality
+      r.challanNo||"",                        // Challan
+      (r.deliveryPlace||"")+(r.transporter?" / "+r.transporter:""), // Delivery
+      r.lotNo||"",                            // Lot
+      +r.meters||0,                           // Meters
+      +r.rate||0,                             // Rate
+      "=J"+row+"*K"+row,                      // Taxable
+      +r.discountPct||0,                      // Disc%
+      "=L"+row+"*M"+row+"/100",               // DiscAmt
+      "=L"+row+"-N"+row,                      // AfterDisc
+      "=O"+row+"*0.025",                      // SGST
+      "=O"+row+"*0.025",                      // CGST
+      "=O"+row+"+P"+row+"+Q"+row,             // Total
+      p[0]?fmtD(p[0].date):"",p[0]?+p[0].amount:0,  // I1Date, I1Amt
+      p[1]?fmtD(p[1].date):"",p[1]?+p[1].amount:0,  // I2Date, I2Amt
+      p[2]?fmtD(p[2].date):"",p[2]?+p[2].amount:0,  // I3Date, I3Amt
+      "=IFERROR(T"+row+"+V"+row+"+X"+row+",0)",       // Rcvd
+      "=R"+row+"-Y"+row,                              // Balance
+      "=IF(R"+row+'="","",IF(Y'+row+'<=0,"Pending",IF(Y'+row+'>=R'+row+'*0.999,"Received",IF(Y'+row+'>R'+row+'*1.001,"Excess","Partial"))))', // Status
+      r.remarks||""                           // Remarks
+    ];
   });
 }
-async function odWriteSheet(dId,iId,tok,ws,rows){
-  if(!rows.length)return;
-  await fetch("https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId+"/workbook/worksheets('"+encodeURIComponent(ws)+"')/range(address='A"+DATA_ROW+":AB200')/clear",
+
+async function odClearWrite(dId,iId,tok,ws,dataRows,isFormula){
+  const gcUrl="https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId+"/workbook/worksheets('"+encodeURIComponent(ws)+"')";
+  // Clear data area
+  await fetch(gcUrl+"/range(address='A"+OD_DR+":AB300')/clear",
     {method:"POST",headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},body:'{"applyTo":"all"}'});
-  const addr="A"+DATA_ROW+":AB"+(DATA_ROW-1+rows.length);
-  const r=await fetch("https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId+"/workbook/worksheets('"+encodeURIComponent(ws)+"')/range(address='"+addr+"')",
-    {method:"PATCH",headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},body:JSON.stringify({formulas:rows})});
-  if(!r.ok)throw new Error("Write '"+ws+"' failed: "+r.status);
+  if(!dataRows.length)return;
+  const addr="A"+OD_DR+":AB"+(OD_DR-1+dataRows.length);
+  const body=isFormula?{formulas:dataRows}:{values:dataRows};
+  const r=await fetch(gcUrl+"/range(address='"+addr+"')",
+    {method:"PATCH",headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok){const t=await r.text();throw new Error("Write '"+ws+"' "+r.status+": "+t.slice(0,120));}
 }
+
 async function odPush(disp,tok,firmName){
   const item=await odFileItem(tok);
   const dId=item.parentReference.driveId,iId=item.id;
-  await odWriteSheet(dId,iId,tok,firmName,odBuildRows(disp,firmName));
-  // All Entries = VSTACK of both firm sheets (formula-driven, auto-updates)
-  try{
-    await fetch("https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId+"/workbook/worksheets('All%20Entries')/range(address='A"+DATA_ROW+":AB200')/clear",
-      {method:"POST",headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},body:'{"applyTo":"all"}'});
-    await fetch("https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId+"/workbook/worksheets('All%20Entries')/range(address='A5')",
-      {method:"PATCH",headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},
-       body:JSON.stringify({formulas:[["=IFERROR(VSTACK('Rajesh Textiles'!A5:AB104,'SN Textiles'!A5:AB104),\"\")"]]})});
-  }catch(e){console.warn("All Entries VSTACK:",e.message);}
-  return disp.length;
+  const rows=odBuildRows(disp,firmName);
+
+  // 1. Push to All Entries (master - raw data + formulas)
+  await odClearWrite(dId,iId,tok,"All Entries",rows,true);
+
+  // 2. Firm sheet = FILTER formula auto-pulling from All Entries
+  const gcUrl="https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId+"/workbook/worksheets('"+encodeURIComponent(firmName)+"')";
+  await fetch(gcUrl+"/range(address='A"+OD_DR+":AB300')/clear",
+    {method:"POST",headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},body:'{"applyTo":"all"}'});
+  // FILTER formula: show only rows where Firm col (C) matches firmName, exclude zeros
+  const filterFml="=IFERROR(FILTER('All Entries'!A"+OD_DR+":AB300,'All Entries'!C"+OD_DR+":C300=\""+firmName+"\"),\"\")";
+  await fetch(gcUrl+"/range(address='A"+OD_DR+"')",
+    {method:"PATCH",headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},
+     body:JSON.stringify({formulas:[[filterFml]]})});
+
+  return rows.length;
 }
+
 async function odPull(tok,firmName){
+  // Pull from All Entries (master) filtered by firm
   const item=await odFileItem(tok);
   const dId=item.parentReference.driveId,iId=item.id;
-  const r=await fetch("https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId+"/workbook/worksheets('"+encodeURIComponent(firmName)+"')/range(address='A"+DATA_ROW+":AB200')/values",
+  const r=await fetch(
+    "https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId+
+    "/workbook/worksheets('All%20Entries')/range(address='A"+OD_DR+":AB300')/values",
     {headers:{Authorization:"Bearer "+tok}});
-  if(!r.ok)throw new Error("Cannot read '"+firmName+"': "+r.status);
+  if(!r.ok)throw new Error("Read All Entries failed: "+r.status);
   const d=await r.json();
-  return(d.value||[]).filter(r=>r[6]).map(r=>({
-    date:isoDate(String(r[1]||""))||today(),customer:r[3]||"",taka:+r[4]||0,
-    designNo:r[5]||"",challanNo:String(r[6]||""),
-    deliveryPlace:(r[7]||"").split(" / ")[0],transporter:(r[7]||"").split(" / ").slice(1).join(" / "),
-    lotNo:r[8]||"",meters:+r[9]||0,rate:+r[10]||0,taxable:+r[11]||0,
-    discountPct:+r[12]||0,discAmt:+r[13]||0,afterDisc:+r[14]||0,sgst:+r[15]||0,cgst:+r[16]||0,total:+r[17]||0,
-    payments:[r[18]&&+r[19]>0?{id:uid(),date:isoDate(String(r[18]))||today(),amount:+r[19],note:"Excel"}:null,
+  return(d.value||[]).filter(r=>r[6]&&r[2]===firmName).map(r=>({
+    date:isoDate(String(r[1]||""))||today(),
+    customer:r[3]||"",taka:+r[4]||0,designNo:r[5]||"",challanNo:String(r[6]||""),
+    deliveryPlace:(r[7]||"").split(" / ")[0],
+    transporter:(r[7]||"").split(" / ").slice(1).join(" / "),
+    lotNo:r[8]||"",meters:+r[9]||0,rate:+r[10]||0,
+    taxable:+r[11]||0,discountPct:+r[12]||0,discAmt:+r[13]||0,
+    afterDisc:+r[14]||0,sgst:+r[15]||0,cgst:+r[16]||0,total:+r[17]||0,
+    payments:[
+      r[18]&&+r[19]>0?{id:uid(),date:isoDate(String(r[18]))||today(),amount:+r[19],note:"Excel"}:null,
       r[20]&&+r[21]>0?{id:uid(),date:isoDate(String(r[20]))||today(),amount:+r[21],note:"Excel"}:null,
-      r[22]&&+r[23]>0?{id:uid(),date:isoDate(String(r[22]))||today(),amount:+r[23],note:"Excel"}:null].filter(Boolean),
+      r[22]&&+r[23]>0?{id:uid(),date:isoDate(String(r[22]))||today(),amount:+r[23],note:"Excel"}:null
+    ].filter(Boolean),
     amountReceived:+r[24]||0,paymentStatus:r[26]||"Pending",remarks:r[27]||""
   }));
 }
+
 function OdSync({disp,firm,firmName,onPull}){
   const[user,setUser]=useState(null);
   const[busy,setBusy]=useState("");
@@ -3337,32 +3380,53 @@ function OdSync({disp,firm,firmName,onPull}){
   const[autoOn,setAutoOn]=useState(false);
   const timerRef=React.useRef(null);
   useEffect(()=>{try{setUser(odUser());}catch(e){}},[]); 
+  // Auto-push when disp changes
   useEffect(()=>{
     if(!autoOn||!user)return;
-    odToken().then(tok=>odPush(disp,tok,firmName)).then(n=>setMsg("☁ "+n+" synced")).catch(()=>{});
+    odToken().then(tok=>odPush(disp,tok,firmName))
+      .then(n=>setMsg("☁ "+n+" synced")).catch(e=>setMsg("⚠ "+e.message));
   },[disp,autoOn,user]);
+  // Auto-pull every 60s
   useEffect(()=>{
     if(!autoOn||!user){clearInterval(timerRef.current);return;}
     timerRef.current=setInterval(async()=>{
-      try{const tok=await odToken();const rows=await odPull(tok,firmName);await onPull(rows);setMsg("☁ pulled "+rows.length);}
-      catch(e){setMsg("⚠ "+e.message);}
+      try{
+        const tok=await odToken();
+        const rows=await odPull(tok,firmName);
+        await onPull(rows);
+        setMsg("☁ pulled "+rows.length);
+      }catch(e){setMsg("⚠ "+e.message);}
     },60000);
     return()=>clearInterval(timerRef.current);
   },[autoOn,user,firmName]);
-  async function signIn(){setBusy("login");try{await odToken();setUser(odUser());}catch(e){setMsg("❌ "+e.message);}setBusy("");}
-  async function push(){setBusy("push");try{const tok=await odToken();const n=await odPush(disp,tok,firmName);setMsg("✅ "+n+" → Excel");}catch(e){setMsg("❌ "+e.message);}setBusy("");}
-  async function pull(){setBusy("pull");try{const tok=await odToken();const rows=await odPull(tok,firmName);await onPull(rows);setMsg("✅ "+rows.length+" ← Excel");}catch(e){setMsg("❌ "+e.message);}setBusy("");}
+
+  async function signIn(){setBusy("login");
+    try{await odToken();setUser(odUser());}catch(e){setMsg("❌ "+e.message);}setBusy("");}
+  async function push(){setBusy("push");
+    try{const tok=await odToken();const n=await odPush(disp,tok,firmName);setMsg("✅ "+n+" → Excel");}
+    catch(e){setMsg("❌ "+e.message);}setBusy("");}
+  async function pull(){setBusy("pull");
+    try{const tok=await odToken();const rows=await odPull(tok,firmName);await onPull(rows);setMsg("✅ "+rows.length+" ← Excel");}
+    catch(e){setMsg("❌ "+e.message);}setBusy("");}
   async function out(){try{await odSignOut();setUser(null);setAutoOn(false);setMsg("");}catch(e){}}
+
   return h("div",{style:{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap",marginTop:4}},
-    !user&&h("button",{className:"btn btn-sm",onClick:signIn,disabled:busy==="login"},busy==="login"?"⏳…":"☁ OneDrive Sign In"),
-    user&&h("button",{className:"btn btn-sm",style:{background:"#0078D4",color:"#fff"},onClick:push,disabled:!!busy},busy==="push"?"⏳…":"☁ Push to Excel"),
-    user&&h("button",{className:"btn btn-sm",onClick:pull,disabled:!!busy},busy==="pull"?"⏳…":"⬇ Pull from Excel"),
-    user&&h("button",{className:"btn btn-sm",style:{background:autoOn?"#1B5E20":"inherit",color:autoOn?"#fff":"inherit"},onClick:()=>setAutoOn(v=>!v)},autoOn?"🔄 Auto ON":"⏸ Auto OFF"),
+    !user&&h("button",{className:"btn btn-sm",onClick:signIn,disabled:busy==="login"},
+      busy==="login"?"⏳…":"☁ OneDrive Sign In"),
+    user&&h("button",{className:"btn btn-sm",style:{background:"#0078D4",color:"#fff"},
+      onClick:push,disabled:!!busy},busy==="push"?"⏳…":"☁ Push to Excel"),
+    user&&h("button",{className:"btn btn-sm",onClick:pull,disabled:!!busy},
+      busy==="pull"?"⏳…":"⬇ Pull from Excel"),
+    user&&h("button",{className:"btn btn-sm",
+      style:{background:autoOn?"#1B5E20":"inherit",color:autoOn?"#fff":"inherit"},
+      onClick:()=>setAutoOn(v=>!v)},autoOn?"🔄 Auto ON":"⏸ Auto OFF"),
     user&&h("span",{style:{fontSize:11,color:"var(--mu)"}},user.name||user.username),
     user&&h("button",{className:"btn btn-sm",style:{fontSize:10},onClick:out},"✕"),
-    msg&&h("span",{style:{fontSize:11,color:msg.startsWith("✅")||msg.startsWith("☁")?"var(--ok)":"var(--er)"}},msg)
+    msg&&h("span",{style:{fontSize:11,
+      color:msg.startsWith("✅")||msg.startsWith("☁")?"var(--ok)":"var(--er)"}},msg)
   );
 }
+
 if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(()=>{}));
 // Show error visibly even if React/Firebase fails to load
 window.onerror=function(msg,src,line){
