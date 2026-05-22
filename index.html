@@ -3379,6 +3379,44 @@ async function odPush(disp,tok,firmName){
     }catch(e){console.warn("Firm sheet",fn,":",e.message);}
   }
 
+  // Step 6a: Format headers + conditional formatting for all sheets
+  const sheets=[...OD_FIRMS,"All Entries"];
+  const aeStatusCol="AA"; const firmStatusCol="S";
+  for(const sn of sheets){
+    const isFirm=sn!=="All Entries";
+    const lastCol=isFirm?"T":"AB";
+    const statusCol=isFirm?firmStatusCol:aeStatusCol;
+    const hdrRange="A4:"+lastCol+"4";
+    // Header row: dark navy bg, white bold text
+    try{await gql(dId,iId,tok,sn,"/range(address='"+hdrRange+"')/format","PATCH",
+      {fill:{color:"#1F3864"},font:{color:"#FFFFFF",bold:true,size:10}});}catch(e){}
+    // Data rows: light alternating - handled by existing sheet formatting (don't overwrite)
+    // Conditional formatting for Payment Status column
+    const statusRange=statusCol+OD_DR+":"+statusCol+"300";
+    // Delete existing conditional formats first
+    try{
+      const cf=await gql(dId,iId,tok,sn,"/conditionalFormats","GET");
+      for(const c of(cf.value||[])){
+        await gql(dId,iId,tok,sn,"/conditionalFormats/"+c.id,"DELETE");
+      }
+    }catch(e){}
+    // Add color rules: Received=green, Partial=orange, Pending=red, Excess=blue
+    const rules=[
+      {text:"Received", fill:"#C6EFCE", font:"#276221"},
+      {text:"Partial",  fill:"#FFEB9C", font:"#9C6500"},
+      {text:"Pending",  fill:"#FFC7CE", font:"#9C0006"},
+      {text:"Excess",   fill:"#BDD7EE", font:"#2E75B6"}
+    ];
+    for(let i=0;i<rules.length;i++){
+      try{await gql(dId,iId,tok,sn,"/conditionalFormats","POST",{
+        type:"containsText",priority:i+1,
+        textComparison:{operator:"contains",text:rules[i].text},
+        format:{fill:{color:rules[i].fill},font:{color:rules[i].font,bold:true}},
+        ranges:[{address:statusRange}]
+      });}catch(e){}
+    }
+  }
+
   return newRows.length;
 }
 
@@ -3418,9 +3456,9 @@ function OdSync({disp,firm,firmName,onPull}){
     if(!autoOn||!user){clearInterval(timerRef.current);return;}
     timerRef.current=setInterval(async()=>{
       try{const tok=await odToken();const rows=await odPull(tok,firmName);
-        await onPull(rows);setMsg("☁ pulled "+rows.length);}
+        await onPull(rows);setMsg("☁ pulled "+rows.length+" @ "+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}));}
       catch(e){setMsg("⚠ "+e.message);}
-    },60000);
+    },30000); // every 30s
     return()=>clearInterval(timerRef.current);
   },[autoOn,user,firmName]);
   async function signIn(){setBusy("login");
