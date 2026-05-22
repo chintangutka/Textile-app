@@ -3281,112 +3281,125 @@ async function odFileItem(tok){
 // Firm sheets (20 cols, no Firm col): Sr|Date|Party|Taka|Quality|Challan|Delivery|Lot|
 //   Meters|Rate|Taxable|Disc%|DiscAmt|AfterDisc|SGST|CGST|Total|Rcvd|Status|Remarks
 const OD_DR=5;
+const OD_FIRMS=["SN Textiles","Rajesh Textiles"];
 
 function odBuildRows(disp,firmName){
   return disp.map((r,i)=>{
-    const row=OD_DR+i;
-    const p=(r.payments||[]).sort((a,b)=>a.date>b.date?1:-1);
-    return[
-      i+1,          // A:Sr
-      r.date||"",   // B:Date (ISO "YYYY-MM-DD" - Excel recognizes natively)
-      firmName,     // C:Firm
-      r.customer||"",                         // D:Party
-      +r.taka||0,                             // E:Taka
-      r.designNo||"",                         // F:Quality
-      r.challanNo||"",                        // G:Challan
-      (r.deliveryPlace||"")+(r.transporter?" / "+r.transporter:""), // H:Delivery
-      r.lotNo||"",                            // I:Lot
-      +r.meters||0,                           // J:Meters
-      +r.rate||0,                             // K:Rate
-      "=J"+row+"*K"+row,                      // L:Taxable
-      +r.discountPct||0,                      // M:Disc%
-      "=L"+row+"*M"+row+"/100",               // N:DiscAmt
-      "=L"+row+"-N"+row,                      // O:AfterDisc
-      "=O"+row+"*0.025",                      // P:SGST
-      "=O"+row+"*0.025",                      // Q:CGST
-      "=O"+row+"+P"+row+"+Q"+row,             // R:Total
-      p[0]?p[0].date:"",  p[0]?+p[0].amount:0, // S:I1Date T:I1Amt
-      p[1]?p[1].date:"",  p[1]?+p[1].amount:0, // U:I2Date V:I2Amt
-      p[2]?p[2].date:"",  p[2]?+p[2].amount:0, // W:I3Date X:I3Amt
-      "=IFERROR(T"+row+"+V"+row+"+X"+row+",0)",  // Y:Rcvd
-      "=R"+row+"-Y"+row,                         // Z:Balance
-      "=IF(R"+row+'="","",IF(Y'+row+'<=0,"Pending",IF(Y'+row+'>=R'+row+'*0.999,"Received",IF(Y'+row+'>R'+row+'*1.001,"Excess","Partial"))))', // AA:Status
-      r.remarks||""  // AB:Remarks
-    ];
+    const row=OD_DR+i, p=(r.payments||[]).sort((a,b)=>a.date>b.date?1:-1);
+    return[i+1,r.date||"",firmName,r.customer||"",+r.taka||0,r.designNo||"",r.challanNo||"",
+      (r.deliveryPlace||"")+(r.transporter?" / "+r.transporter:""),r.lotNo||"",
+      +r.meters||0,+r.rate||0,
+      "=J"+row+"*K"+row,+r.discountPct||0,"=L"+row+"*M"+row+"/100","=L"+row+"-N"+row,
+      "=O"+row+"*0.025","=O"+row+"*0.025","=O"+row+"+P"+row+"+Q"+row,
+      p[0]?p[0].date:"",p[0]?+p[0].amount:0,
+      p[1]?p[1].date:"",p[1]?+p[1].amount:0,
+      p[2]?p[2].date:"",p[2]?+p[2].amount:0,
+      "=IFERROR(T"+row+"+V"+row+"+X"+row+",0)",
+      "=R"+row+"-Y"+row,
+      "=IF(R"+row+'="","",IF(Y'+row+'<=0,"Pending",IF(Y'+row+'>=R'+row+'*0.999,"Received",IF(Y'+row+'>R'+row+'*1.001,"Excess","Partial"))))',
+      r.remarks||""];
   });
 }
 
-async function odWriteRange(dId,iId,tok,ws,addr,payload){
-  const url="https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId
-    +"/workbook/worksheets('"+encodeURIComponent(ws)+"')/range(address='"+addr+"')";
-  const r=await fetch(url,{method:"PATCH",
+async function gql(dId,iId,tok,ws,path,method,body){
+  const base="https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId
+    +"/workbook/worksheets('"+encodeURIComponent(ws)+"')";
+  const r=await fetch(base+path,{method,
     headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},
-    body:JSON.stringify(payload)});
-  if(!r.ok){const t=await r.text();throw new Error("Write '"+ws+"':"+r.status+" "+t.slice(0,100));}
-}
-async function odClear(dId,iId,tok,ws,addr){
-  const url="https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId
-    +"/workbook/worksheets('"+encodeURIComponent(ws)+"')/range(address='"+addr+"')/clear";
-  await fetch(url,{method:"POST",
-    headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},
-    body:'{"applyTo":"contents"}'});
+    body:body?JSON.stringify(body):undefined});
+  if(!r.ok){const t=await r.text();throw new Error(ws+":"+r.status+" "+t.slice(0,80));}
+  return r.headers.get("content-type")&&r.headers.get("content-type").includes("json")?r.json():null;
 }
 
 async function odPush(disp,tok,firmName){
   const item=await odFileItem(tok);
   const dId=item.parentReference.driveId,iId=item.id;
-  const rows=odBuildRows(disp,firmName);
 
-  // 1. Write raw data+formulas to All Entries (master, 28 cols)
-  await odClear(dId,iId,tok,"All Entries","A"+OD_DR+":AB300");
-  if(rows.length){
-    await odWriteRange(dId,iId,tok,"All Entries","A"+OD_DR+":AB"+(OD_DR-1+rows.length),
-      {formulas:rows});
+  // Step 1: Read existing All Entries to preserve OTHER firm's rows
+  let existingRows=[];
+  try{
+    const d=await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB200')/values","GET");
+    existingRows=(d.value||[]).filter(r=>r[2]&&r[2]!==firmName&&r[6]); // keep other firm rows
+  }catch(e){console.warn("Could not read existing rows",e.message);}
+
+  // Step 2: Build current firm rows
+  const newRows=odBuildRows(disp,firmName);
+
+  // Step 3: Combine — other firm rows first (as plain values), then current firm (with formulas)
+  // Re-number Sr for combined
+  const combined=[...existingRows.map((r,i)=>[i+1,...r.slice(1)]),...newRows.map((r,i)=>[existingRows.length+i+1,...r.slice(1)])];
+
+  // Step 4: Write headers + data to All Entries
+  const hdrs=[["Sr","Date","Firm","Party","Taka","Quality","Challan","Delivery & Transport","Lot","Meters","Rate","Taxable","Disc%","DiscAmt","AfterDisc","SGST 2.5%","CGST 2.5%","Total","I1Date","I1Amt","I2Date","I2Amt","I3Date","I3Amt","Rcvd","Balance","Status","Remarks"]];
+  await gql(dId,iId,tok,"All Entries","/range(address='A4:AB4')","PATCH",{values:hdrs});
+  await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB300')/clear","POST",{applyTo:"contents"});
+
+  if(combined.length){
+    // Write other-firm rows as values
+    if(existingRows.length){
+      await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB"+(OD_DR-1+existingRows.length)+"')","PATCH",
+        {values:existingRows.map((r,i)=>[i+1,...r.slice(1)])});
+    }
+    // Write current firm rows with formulas (offset by existingRows.length)
+    const fStart=OD_DR+existingRows.length;
+    const fmlRows=newRows.map((r,i)=>{
+      // Recalculate row references for correct row numbers
+      const row=fStart+i;
+      return[existingRows.length+i+1,r[1],r[2],r[3],r[4],r[5],r[6],r[7],r[8],r[9],r[10],
+        "=J"+row+"*K"+row,r[12],"=L"+row+"*M"+row+"/100","=L"+row+"-N"+row,
+        "=O"+row+"*0.025","=O"+row+"*0.025","=O"+row+"+P"+row+"+Q"+row,
+        r[18],r[19],r[20],r[21],r[22],r[23],
+        "=IFERROR(T"+row+"+V"+row+"+X"+row+",0)",
+        "=R"+row+"-Y"+row,
+        "=IF(R"+row+'="","",IF(Y'+row+'<=0,"Pending",IF(Y'+row+'>=R'+row+'*0.999,"Received",IF(Y'+row+'>R'+row+'*1.001,"Excess","Partial"))))',
+        r[27]];
+    });
+    await gql(dId,iId,tok,"All Entries","/range(address='A"+fStart+":AB"+(fStart-1+fmlRows.length)+"')","PATCH",{formulas:fmlRows});
   }
 
-  // 2. Firm sheet = CHOOSECOLS(FILTER(...)) - 20 cols, no Firm column
-  // CHOOSECOLS picks cols: 1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,25,27,28
+  // Step 5: Apply date format to date columns in All Entries
+  const dateFmt=[['"dd-mmm-yy"']];
+  await gql(dId,iId,tok,"All Entries","/range(address='B"+OD_DR+":B300')","PATCH",{numberFormat:[["dd-mmm-yy"]]});
+  for(const col of["S","U","W"]){
+    await gql(dId,iId,tok,"All Entries","/range(address='"+col+OD_DR+":"+col+"300')","PATCH",{numberFormat:[["dd-mmm-yy"]]});
+  }
+
+  // Step 6: Update BOTH firm sheets with CHOOSECOLS FILTER formula
+  // CHOOSECOLS cols 1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,25,27,28
   // = Sr,Date,Party,Taka,Quality,Challan,Delivery,Lot,Meters,Rate,Taxable,Disc%,
   //   DiscAmt,AfterDisc,SGST,CGST,Total,Rcvd,Status,Remarks
-  const fFml="=IFERROR(CHOOSECOLS(FILTER('All Entries'!A"+OD_DR+":AB300,"
-    +"'All Entries'!C"+OD_DR+":C300=\""+firmName+"\"),"
-    +"1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,25,27,28),\"\")";
-  await odClear(dId,iId,tok,firmName,"A"+OD_DR+":T300");
-  await odWriteRange(dId,iId,tok,firmName,"A"+OD_DR,{formulas:[[fFml]]});
+  const fHdrs=[["Sr.No.","Date","Party Name","No. of Taka","Quality","Challan No.","Delivery Place & Transport","Lot No.","Total Meters","Rate (₹)","Taxable Amount (₹)","Discount (%)","Discount Amt (₹)","After Discount (₹)","SGST 2.5% (₹)","CGST 2.5% (₹)","Total Amount (₹)","Amt Rcvd (₹)","Payment Status","Remarks"]];
+  for(const fn of OD_FIRMS){
+    try{
+      await gql(dId,iId,tok,fn,"/range(address='A4:T4')","PATCH",{values:fHdrs});
+      await gql(dId,iId,tok,fn,"/range(address='A"+OD_DR+":T300')/clear","POST",{applyTo:"contents"});
+      const ff="=IFERROR(CHOOSECOLS(FILTER('All Entries'!A"+OD_DR+":AB300,'All Entries'!C"+OD_DR+":C300=\""+fn+"\"),1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,25,27,28),\"\")";
+      await gql(dId,iId,tok,fn,"/range(address='A"+OD_DR+"')","PATCH",{formulas:[[ff]]});
+      await gql(dId,iId,tok,fn,"/range(address='B"+OD_DR+":B300')","PATCH",{numberFormat:[["dd-mmm-yy"]]});
+    }catch(e){console.warn("Firm sheet",fn,":",e.message);}
+  }
 
-  return rows.length;
+  return newRows.length;
 }
 
 async function odPull(tok,firmName){
-  // Pull computed values from All Entries filtered by firm
   const item=await odFileItem(tok);
   const dId=item.parentReference.driveId,iId=item.id;
-  // Use /values endpoint to get computed results (not formulas)
-  const r=await fetch(
-    "https://graph.microsoft.com/v1.0/drives/"+dId+"/items/"+iId
-    +"/workbook/worksheets('All%20Entries')/range(address='A"+OD_DR+":AB300')/values",
-    {headers:{Authorization:"Bearer "+tok}});
-  if(!r.ok)throw new Error("Read All Entries: "+r.status);
-  const d=await r.json();
-  return(d.value||[])
-    .filter(r=>r[6]&&r[2]===firmName)  // col 6=Challan, col 2=Firm
-    .map(r=>({
-      date:String(r[1]||"").slice(0,10)||today(),
-      customer:String(r[3]||""),  taka:+r[4]||0,  designNo:String(r[5]||""),
-      challanNo:String(r[6]||""),
-      deliveryPlace:String(r[7]||"").split(" / ")[0],
-      transporter:String(r[7]||"").split(" / ").slice(1).join(" / "),
-      lotNo:String(r[8]||""),  meters:+r[9]||0,  rate:+r[10]||0,
-      taxable:+r[11]||0,  discountPct:+r[12]||0,  discAmt:+r[13]||0,
-      afterDisc:+r[14]||0,  sgst:+r[15]||0,  cgst:+r[16]||0,  total:+r[17]||0,
-      payments:[
-        r[18]&&+r[19]>0?{id:uid(),date:String(r[18]).slice(0,10)||today(),amount:+r[19],note:"Excel"}:null,
-        r[20]&&+r[21]>0?{id:uid(),date:String(r[20]).slice(0,10)||today(),amount:+r[21],note:"Excel"}:null,
-        r[22]&&+r[23]>0?{id:uid(),date:String(r[22]).slice(0,10)||today(),amount:+r[23],note:"Excel"}:null
-      ].filter(Boolean),
-      amountReceived:+r[24]||0,  paymentStatus:String(r[26]||"Pending"),
-      remarks:String(r[27]||"")
-    }));
+  const d=await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB300')/values","GET");
+  return(d.value||[]).filter(r=>r[6]&&r[2]===firmName).map(r=>({
+    date:String(r[1]||"").slice(0,10)||today(),
+    customer:String(r[3]||""),taka:+r[4]||0,designNo:String(r[5]||""),challanNo:String(r[6]||""),
+    deliveryPlace:String(r[7]||"").split(" / ")[0],transporter:String(r[7]||"").split(" / ").slice(1).join(" / "),
+    lotNo:String(r[8]||""),meters:+r[9]||0,rate:+r[10]||0,
+    taxable:+r[11]||0,discountPct:+r[12]||0,discAmt:+r[13]||0,
+    afterDisc:+r[14]||0,sgst:+r[15]||0,cgst:+r[16]||0,total:+r[17]||0,
+    payments:[
+      r[18]&&+r[19]>0?{id:uid(),date:String(r[18]).slice(0,10)||today(),amount:+r[19],note:"Excel"}:null,
+      r[20]&&+r[21]>0?{id:uid(),date:String(r[20]).slice(0,10)||today(),amount:+r[21],note:"Excel"}:null,
+      r[22]&&+r[23]>0?{id:uid(),date:String(r[22]).slice(0,10)||today(),amount:+r[23],note:"Excel"}:null
+    ].filter(Boolean),
+    amountReceived:+r[24]||0,paymentStatus:String(r[26]||"Pending"),remarks:String(r[27]||"")
+  }));
 }
 
 function OdSync({disp,firm,firmName,onPull}){
@@ -3414,7 +3427,7 @@ function OdSync({disp,firm,firmName,onPull}){
     try{await odToken();setUser(odUser());}catch(e){setMsg("❌ "+e.message);}setBusy("");}
   async function push(){setBusy("push");
     try{const tok=await odToken();const n=await odPush(disp,tok,firmName);
-      setMsg("✅ "+n+" rows → Excel");}
+      setMsg("✅ "+n+" rows synced");}
     catch(e){setMsg("❌ "+e.message);}setBusy("");}
   async function pull(){setBusy("pull");
     try{const tok=await odToken();const rows=await odPull(tok,firmName);
