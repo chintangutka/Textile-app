@@ -2845,16 +2845,23 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
 
   // OneDrive Excel pull handler
   async function handleOdPull(rows){
+    if(!rows||rows.length===0){toast2("Excel: 0 rows found for this firm","err");return;}
     let added=0,updated=0;
     for(const row of rows){
       if(!row.challanNo)continue;
       const ex=disp.find(d=>d.challanNo&&String(d.challanNo)===String(row.challanNo));
-      const rcvd=+row.amountReceived||0;
-      const mapped={...row,paymentStatus:calcPmt(rcvd,+row.total||0)};
-      if(ex){await dbUpdate(firm,"dispatch",ex._id,{...ex,...mapped});updated++;}
-      else{await dbs(firm,"dispatch",uid(),mapped);added++;}
+      const total=+row.total||0;
+      const rcvd=+row.amountReceived||row.payments.reduce((s,p)=>s+(+p.amount||0),0)||0;
+      const merged={...row,amountReceived:rcvd,paymentStatus:calcPmt(rcvd,total)};
+      if(ex){
+        await dbUpdate(firm,"dispatch",ex._id,{...ex,...merged,payments:merged.payments});
+        updated++;
+      } else {
+        await dbs(firm,"dispatch",uid(),merged);
+        added++;
+      }
     }
-    toast2("Excel: "+added+" added, "+updated+" updated");
+    toast2("Excel pulled: "+rows.length+" rows ("+updated+" updated, "+added+" added)");
   }
 
   // Computed
@@ -3437,19 +3444,44 @@ async function odPull(tok,firmName){
   const item=await odFileItem(tok);
   const dId=item.parentReference.driveId,iId=item.id;
   const d=await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB300')/values","GET");
-  return(d.value||[]).filter(r=>r[6]&&r[2]===firmName).map(r=>({
-    date:String(r[1]||"").slice(0,10)||today(),
-    customer:String(r[3]||""),taka:+r[4]||0,designNo:String(r[5]||""),challanNo:String(r[6]||""),
-    deliveryPlace:String(r[7]||"").split(" / ")[0],transporter:String(r[7]||"").split(" / ").slice(1).join(" / "),
-    lotNo:String(r[8]||""),meters:+r[9]||0,rate:+r[10]||0,
-    taxable:+r[11]||0,discountPct:+r[12]||0,discAmt:+r[13]||0,
-    afterDisc:+r[14]||0,sgst:+r[15]||0,cgst:+r[16]||0,total:+r[17]||0,
+  
+  // Convert Excel date serial or string to ISO date
+  function exDate(v){
+    if(!v)return"";
+    if(typeof v==="number"&&v>1000){
+      // Excel serial → JS date (Excel epoch offset = 25569 days from Unix epoch)
+      const ms=(v-25569)*86400000;
+      const d2=new Date(ms);
+      if(!isNaN(d2.getTime()))return d2.toISOString().split("T")[0];
+    }
+    const s=String(v).trim();
+    if(!s)return"";
+    // Try parsing "31-May-26", "2026-05-31", etc.
+    const pd=new Date(s);
+    if(!isNaN(pd.getTime()))return pd.toISOString().split("T")[0];
+    return s.slice(0,10);
+  }
+
+  const rows=(d.value||[]).filter(r=>r[6]&&String(r[2])===firmName);
+  
+  return rows.map(r=>({
+    date:exDate(r[1])||today(),
+    customer:String(r[3]||""),   taka:+r[4]||0,
+    designNo:String(r[5]||""),   challanNo:String(r[6]||""),
+    deliveryPlace:String(r[7]||"").split(" / ")[0],
+    transporter:String(r[7]||"").split(" / ").slice(1).join(" / "),
+    lotNo:String(r[8]||""),      meters:+r[9]||0,   rate:+r[10]||0,
+    taxable:+r[11]||0,           discountPct:+r[12]||0,
+    discAmt:+r[13]||0,           afterDisc:+r[14]||0,
+    sgst:+r[15]||0,              cgst:+r[16]||0,    total:+r[17]||0,
     payments:[
-      r[18]&&+r[19]>0?{id:uid(),date:String(r[18]).slice(0,10)||today(),amount:+r[19],note:"Excel"}:null,
-      r[20]&&+r[21]>0?{id:uid(),date:String(r[20]).slice(0,10)||today(),amount:+r[21],note:"Excel"}:null,
-      r[22]&&+r[23]>0?{id:uid(),date:String(r[22]).slice(0,10)||today(),amount:+r[23],note:"Excel"}:null
+      +r[19]>0?{id:uid(),date:exDate(r[18])||today(),amount:+r[19],note:"Excel"}:null,
+      +r[21]>0?{id:uid(),date:exDate(r[20])||today(),amount:+r[21],note:"Excel"}:null,
+      +r[23]>0?{id:uid(),date:exDate(r[22])||today(),amount:+r[23],note:"Excel"}:null
     ].filter(Boolean),
-    amountReceived:+r[24]||0,paymentStatus:String(r[26]||"Pending"),remarks:String(r[27]||"")
+    amountReceived:+r[24]||0,
+    paymentStatus:String(r[26]||"Pending"),
+    remarks:String(r[27]||"")
   }));
 }
 
