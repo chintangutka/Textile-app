@@ -3379,64 +3379,61 @@ async function odPush(disp,tok,firmName){
     }catch(e){console.warn("Firm sheet",fn,":",e.message);}
   }
 
+  // ── Format helper ───────────────────────────────────────
+  async function fmt(ws,addr,fill,font){
+    const base="/range(address='"+addr+"')/format";
+    try{if(fill)await gql(dId,iId,tok,ws,base+"/fill","PATCH",{color:fill});}catch(e){}
+    try{if(font)await gql(dId,iId,tok,ws,base+"/font","PATCH",font);}catch(e){}
+  }
+
   // ── Format All Entries ──────────────────────────────────
   const AE="All Entries";
   const totalDataRows=existingRows.length+newRows.length;
-
-  // Full header row (all 28 cols A-AB)
-  await gql(dId,iId,tok,AE,"/range(address='A4:AB4')/format","PATCH",
-    {fill:{color:"#1F3864"},font:{color:"#FFFFFF",bold:true,size:10},rowHeight:22});
-  // Alternating row colors for data rows
-  for(let i=0;i<totalDataRows;i++){
+  // Header row A4:AB4 — dark navy, white bold
+  await fmt(AE,"A4:AB4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
+  // Alternating row colors
+  for(let i=0;i<Math.min(totalDataRows,100);i++){
     const row=OD_DR+i;
-    const bg=i%2===0?"#EBF3FB":"#FFFFFF";
-    try{await gql(dId,iId,tok,AE,"/range(address='A"+row+":AB"+row+"')/format","PATCH",{fill:{color:bg}});}catch(e){}
+    await fmt(AE,"A"+row+":AB"+row,i%2===0?"#EBF3FB":"#FFFFFF",null);
   }
-  // Payment status colors - direct fill on AA column based on actual Firestore data
+  // Payment status cell colors from Firestore data
   const SC={"Received":["#C6EFCE","#276221"],"Partial":["#FFEB9C","#9C6500"],
             "Pending":["#FFC7CE","#9C0006"],"Excess":["#BDD7EE","#2E75B6"]};
   for(let i=0;i<disp.length;i++){
-    const row=fStart+i;
-    const st=disp[i].paymentStatus||"Pending";
+    const row=fStart+i, st=disp[i].paymentStatus||"Pending";
     const [bg,fc]=SC[st]||SC["Pending"];
-    try{await gql(dId,iId,tok,AE,"/range(address='AA"+row+":AA"+row+"')/format","PATCH",
-      {fill:{color:bg},font:{color:fc,bold:true}});}catch(e){}
+    await fmt(AE,"AA"+row+":AA"+row,bg,{color:fc,bold:true});
   }
 
-  // ── Format Firm Sheets (both) ────────────────────────────
+  // ── Format Firm Sheets ──────────────────────────────────
   for(const fn of OD_FIRMS){
-    try{
-      // Full header row (20 cols A-T)
-      await gql(dId,iId,tok,fn,"/range(address='A4:T4')/format","PATCH",
-        {fill:{color:"#1F3864"},font:{color:"#FFFFFF",bold:true,size:10},rowHeight:22});
-      // Alternating row colors
-      for(let i=0;i<50;i++){
-        const row=OD_DR+i;
-        const bg=i%2===0?"#EBF3FB":"#FFFFFF";
-        await gql(dId,iId,tok,fn,"/range(address='A"+row+":T"+row+"')/format","PATCH",{fill:{color:bg}});
-      }
-      // Status colors via conditional formats (correct Graph API 3-step approach)
-      const sRng="S"+OD_DR+":S300";
-      const rules=[
-        {text:"Received",fill:"#C6EFCE",fc:"#276221"},
-        {text:"Partial", fill:"#FFEB9C",fc:"#9C6500"},
-        {text:"Pending", fill:"#FFC7CE",fc:"#9C0006"},
-        {text:"Excess",  fill:"#BDD7EE",fc:"#2E75B6"}
-      ];
-      for(const rule of rules){
-        // Step 1: create conditional format on the range
+    // Header A4:T4
+    await fmt(fn,"A4:T4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
+    // Alternating row colors
+    for(let i=0;i<50;i++){
+      const row=OD_DR+i;
+      await fmt(fn,"A"+row+":T"+row,i%2===0?"#EBF3FB":"#FFFFFF",null);
+    }
+    // Conditional formatting for status col S (3-step Graph API)
+    const sRng="S"+OD_DR+":S300";
+    const rules=[
+      {text:"Received",fill:"#C6EFCE",fc:"#276221"},
+      {text:"Partial", fill:"#FFEB9C",fc:"#9C6500"},
+      {text:"Pending", fill:"#FFC7CE",fc:"#9C0006"},
+      {text:"Excess",  fill:"#BDD7EE",fc:"#2E75B6"}
+    ];
+    for(const rule of rules){
+      try{
         const cf=await gql(dId,iId,tok,fn,"/range(address='"+sRng+"')/conditionalFormats","POST",
           {type:"containsText"});
         if(!cf||!cf.id)continue;
-        // Step 2: set the text comparison
         await gql(dId,iId,tok,fn,"/conditionalFormats/"+cf.id+"/textComparison","PATCH",
           {operator:"containsText",text:rule.text});
-        // Step 3: set the format
         await gql(dId,iId,tok,fn,"/conditionalFormats/"+cf.id+"/format/fill","PATCH",{color:rule.fill});
         await gql(dId,iId,tok,fn,"/conditionalFormats/"+cf.id+"/format/font","PATCH",
           {color:rule.fc,bold:true});
-      }
-    }catch(e){console.warn("Format",fn,":",e.message);}
+      }catch(e){console.warn("CF",fn,rule.text,e.message);}
+    }
   }
 
   return newRows.length;
