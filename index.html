@@ -3334,14 +3334,8 @@ async function odPush(disp,tok,firmName){
   await gql(dId,iId,tok,"All Entries","/range(address='A4:AB4')","PATCH",{values:hdrs});
   await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB300')/clear","POST",{applyTo:"contents"});
 
+  const fStart=OD_DR+existingRows.length;
   if(combined.length){
-    // Write other-firm rows as values
-    if(existingRows.length){
-      await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB"+(OD_DR-1+existingRows.length)+"')","PATCH",
-        {values:existingRows.map((r,i)=>[i+1,...r.slice(1)])});
-    }
-    // Write current firm rows with formulas (offset by existingRows.length)
-    const fStart=OD_DR+existingRows.length;
     const fmlRows=newRows.map((r,i)=>{
       // Recalculate row references for correct row numbers
       const row=fStart+i;
