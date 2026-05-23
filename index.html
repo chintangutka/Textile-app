@@ -3408,6 +3408,7 @@ async function odPush(disp,tok,firmName){
 
   // ── Format All Entries ─────────────────────────────────
   const AE="All Entries";
+  const totalDataRows=existingRows.length+newRows.length;
   const dataEnd=OD_DR+Math.max(totalDataRows-1,0);
   await fmt(AE,"A4:AB4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
   if(totalDataRows>0) await fmt(AE,"A"+OD_DR+":AB"+dataEnd,"#EBF3FB",null);
