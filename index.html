@@ -3325,7 +3325,7 @@ function odBuildRows(disp,firmName){
       p[2]?p[2].date:"",p[2]?+p[2].amount:0,
       "=IFERROR(T"+row+"+V"+row+"+X"+row+",0)",
       "=R"+row+"-Y"+row,
-      "=IF(R"+row+'="","",IF(Y'+row+'<=0,"Pending",IF(Y'+row+'>=R'+row+'*0.999,"Received",IF(Y'+row+'>R'+row+'*1.001,"Excess","Partial"))))',
+      "=IF(R"+row+'="","",IF(Y'+row+'<=0,"Pending",IF(Y'+row+'>R'+row+'*1.001,"Excess",IF(Y'+row+'>=R'+row+'*0.999,"Received","Partial"))))',
       r.remarks||""];
   });
 }
@@ -3374,7 +3374,7 @@ async function odPush(disp,tok,firmName){
         r[18],r[19],r[20],r[21],r[22],r[23],
         "=IFERROR(T"+row+"+V"+row+"+X"+row+",0)",
         "=R"+row+"-Y"+row,
-        "=IF(R"+row+'="","",IF(Y'+row+'<=0,"Pending",IF(Y'+row+'>=R'+row+'*0.999,"Received",IF(Y'+row+'>R'+row+'*1.001,"Excess","Partial"))))',
+        "=IF(R"+row+'="","",IF(Y'+row+'<=0,"Pending",IF(Y'+row+'>R'+row+'*1.001,"Excess",IF(Y'+row+'>=R'+row+'*0.999,"Received","Partial"))))',
         r[27]];
     });
     await gql(dId,iId,tok,"All Entries","/range(address='A"+fStart+":AB"+(fStart-1+fmlRows.length)+"')","PATCH",{formulas:fmlRows});
@@ -3439,7 +3439,18 @@ async function odPush(disp,tok,firmName){
   const totalDataRows=existingRows.length+newRows.length;
   const dataEnd=OD_DR+Math.max(totalDataRows-1,0);
   await fmt(AE,"A4:AB4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
-  if(totalDataRows>0) await fmt(AE,"A"+OD_DR+":AB"+dataEnd,"#EBF3FB",null);
+  if(totalDataRows>0) await fmt(AE,"A"+OD_DR+":AB"+dataEnd,"#F8F9FA",null);
+  // Column group shading — alternating pastel colors per instalment pair
+  if(totalDataRows>0){
+    const dr=OD_DR+":"+dataEnd;
+    await fmt(AE,"A"+dr+":G"+dataEnd,"#F0F4FF",null);   // Sr–Delivery: light blue
+    await fmt(AE,"H"+dr+":K"+dataEnd,"#FFF8E1",null);   // Lot–Taxable: light yellow
+    await fmt(AE,"L"+dr+":R"+dataEnd,"#F3F9F3",null);   // Disc–Total: light green
+    await fmt(AE,"S"+dr+":T"+dataEnd,"#EDE7F6",null);   // I1: light purple
+    await fmt(AE,"U"+dr+":V"+dataEnd,"#E0F7FA",null);   // I2: light teal
+    await fmt(AE,"W"+dr+":X"+dataEnd,"#EDE7F6",null);   // I3: light purple
+    await fmt(AE,"Y"+dr+":Z"+dataEnd,"#FFF3E0",null);   // Rcvd/Balance: light orange
+  }
   // Status colors: use recalculated status (not stale paymentStatus)
   const byStatus={};
   disp.forEach((d,i)=>{
