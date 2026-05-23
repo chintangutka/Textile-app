@@ -189,6 +189,13 @@ const uid=()=>Math.random().toString(36).substr(2,9);
 const today=()=>new Date().toISOString().split("T")[0];
 const fmt=n=>Number(n||0).toLocaleString("en-IN");
 const MMAP={Jan:"01",Feb:"02",Mar:"03",Apr:"04",May:"05",Jun:"06",Jul:"07",Aug:"08",Sep:"09",Oct:"10",Nov:"11",Dec:"12"};
+function calcPmt(rcvd,tot){
+  const r=+rcvd||0,t=+tot||0;
+  if(r<=0)return"Pending";
+  if(t>0&&r>t*1.001)return"Excess";
+  if(t>0&&r>=t*0.999)return"Received";
+  return"Partial";
+}
 function isoDate(d){
   if(!d)return"";
   if(typeof d==="object"&&d.toISOString)return d.toISOString().slice(0,10);
