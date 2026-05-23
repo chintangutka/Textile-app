@@ -3390,17 +3390,23 @@ async function odPush(disp,tok,firmName){
   const SC={"Received":["#D9EAD3","#2D6A2D"],"Partial":["#FFF2CC","#7D6608"],
             "Pending":["#FCE8E8","#A61C00"],"Excess":["#E4DFEC","#5B2C8D"]};
 
-  // Build 20-col firm rows from disp (firm sheet only, no Firm column)
+  // Build 20-col firm rows - CORRECT column letters: I=Meters, J=Rate
   const firmRows=disp.map((r,i)=>{
     const row2=OD_DR+i;
     const rcvd=+r.amountReceived||0;
-    return[i+1, r.date||"", r.customer||"", +r.taka||0, r.designNo||"",
-      r.challanNo||"", (r.deliveryPlace||"")+(r.transporter?" / "+r.transporter:""),
-      r.lotNo||"", +r.meters||0, +r.rate||0,
-      "=J"+row2+"*K"+row2, +r.discountPct||0, "=L"+row2+"*M"+row2+"/100",
-      "=L"+row2+"-N"+row2, "=O"+row2+"*0.025", "=O"+row2+"*0.025",
-      "=O"+row2+"+P"+row2+"+Q"+row2,
-      rcvd, r.paymentStatus||"Pending", r.remarks||""];
+    const total=+r.total||0;
+    const actualStatus=calcPmt(rcvd,total); // recalculate, don't use stale paymentStatus
+    return[i+1,r.date||"",r.customer||"",+r.taka||0,r.designNo||"",r.challanNo||"",
+      (r.deliveryPlace||"")+(r.transporter?" / "+r.transporter:""),r.lotNo||"",
+      +r.meters||0,+r.rate||0,
+      "=I"+row2+"*J"+row2,            // K:Taxable = Meters(I) × Rate(J)
+      +r.discountPct||0,               // L:Disc%
+      "=K"+row2+"*L"+row2+"/100",     // M:DiscAmt
+      "=K"+row2+"-M"+row2,            // N:AfterDisc
+      "=N"+row2+"*0.025",              // O:SGST
+      "=N"+row2+"*0.025",              // P:CGST
+      "=N"+row2+"+O"+row2+"+P"+row2,  // Q:Total
+      rcvd,actualStatus,r.remarks||""];
   });
 
   try{
@@ -3427,10 +3433,11 @@ async function odPush(disp,tok,firmName){
   const dataEnd=OD_DR+Math.max(totalDataRows-1,0);
   await fmt(AE,"A4:AB4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
   if(totalDataRows>0) await fmt(AE,"A"+OD_DR+":AB"+dataEnd,"#EBF3FB",null);
-  // Status colors: group by status, 1 API call per status type
+  // Status colors: use recalculated status (not stale paymentStatus)
   const byStatus={};
   disp.forEach((d,i)=>{
-    const st=d.paymentStatus||"Pending",row=fStart+i;
+    const st=calcPmt(+d.amountReceived||0,+d.total||0);
+    const row=fStart+i;
     (byStatus[st]=byStatus[st]||[]).push(row);
   });
   for(const[st,rows2]of Object.entries(byStatus)){
@@ -3444,7 +3451,8 @@ async function odPush(disp,tok,firmName){
   // Status colors (col S = position 18, direct fill per status group)
   const byStatus2={};
   disp.forEach((d,i)=>{
-    const st=d.paymentStatus||"Pending",row=OD_DR+i;
+    const st=calcPmt(+d.amountReceived||0,+d.total||0);
+    const row=OD_DR+i;
     (byStatus2[st]=byStatus2[st]||[]).push(row);
   });
   for(const[st,rows2]of Object.entries(byStatus2)){
@@ -3458,39 +3466,54 @@ async function odPush(disp,tok,firmName){
 async function odPull(tok,firmName){
   const item=await odFileItem(tok);
   const dId=item.parentReference.driveId,iId=item.id;
-  // Always read from All Entries (master with firm column + instalment cols)
-  const d=await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB300')/values","GET");
   function exDate(v){
     if(!v)return"";
-    if(typeof v==="number"&&v>1000){
-      const d2=new Date((v-25569)*86400000);
-      return isNaN(d2)?"":(d2.toISOString().split("T")[0]);
-    }
-    const s=String(v).trim();
-    const pd=new Date(s);
+    if(typeof v==="number"&&v>1000){const d2=new Date((v-25569)*86400000);return isNaN(d2)?"":(d2.toISOString().split("T")[0]);}
+    const s=String(v).trim(),pd=new Date(s);
     return isNaN(pd.getTime())?s.slice(0,10):pd.toISOString().split("T")[0];
   }
-  // Return ALL rows (current firm + other firms) for firm-change detection
-  return(d.value||[]).filter(r=>r[6]).map(r=>({
-    _excelFirm:String(r[2]||""),
-    date:exDate(r[1])||today(),   customer:String(r[3]||""),
-    taka:+r[4]||0,                designNo:String(r[5]||""),
-    challanNo:String(r[6]||""),
-    deliveryPlace:String(r[7]||"").split(" / ")[0],
-    transporter:String(r[7]||"").split(" / ").slice(1).join(" / "),
-    lotNo:String(r[8]||""),       meters:+r[9]||0,   rate:+r[10]||0,
-    taxable:+r[11]||0,            discountPct:+r[12]||0,
-    discAmt:+r[13]||0,            afterDisc:+r[14]||0,
-    sgst:+r[15]||0,               cgst:+r[16]||0,    total:+r[17]||0,
-    payments:[
-      +r[19]>0?{id:uid(),date:exDate(r[18])||today(),amount:+r[19],note:"Excel"}:null,
-      +r[21]>0?{id:uid(),date:exDate(r[20])||today(),amount:+r[21],note:"Excel"}:null,
-      +r[23]>0?{id:uid(),date:exDate(r[22])||today(),amount:+r[23],note:"Excel"}:null
-    ].filter(Boolean),
-    amountReceived:+r[24]||0,
-    paymentStatus:String(r[26]||"Pending"),
-    remarks:String(r[27]||"")
-  }));
+
+  // Read All Entries (28 cols) for instalment details + firm changes
+  let aeMap={};
+  try{
+    const ae=await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB300')/values","GET");
+    (ae.value||[]).filter(r=>r[6]).forEach(r=>{
+      aeMap[String(r[6])]={
+        _excelFirm:String(r[2]||""),
+        payments:[
+          +r[19]>0?{id:uid(),date:exDate(r[18])||today(),amount:+r[19],note:"Excel"}:null,
+          +r[21]>0?{id:uid(),date:exDate(r[20])||today(),amount:+r[21],note:"Excel"}:null,
+          +r[23]>0?{id:uid(),date:exDate(r[22])||today(),amount:+r[23],note:"Excel"}:null
+        ].filter(Boolean),
+        amountReceived:+r[24]||0
+      };
+    });
+  }catch(e){console.warn("AE read:",e.message);}
+
+  // Read firm sheet (20 cols) for latest editable fields
+  const fs=await gql(dId,iId,tok,firmName,"/range(address='A"+OD_DR+":T300')/values","GET");
+  const firmData=(fs.value||[]).filter(r=>r[5]);
+
+  return firmData.map(r=>{
+    const challan=String(r[5]||"");
+    const ae=aeMap[challan]||{};
+    const rcvd=ae.amountReceived||+r[17]||0;
+    return{
+      _excelFirm:ae._excelFirm||firmName,
+      date:exDate(r[1])||today(),    customer:String(r[2]||""),
+      taka:+r[3]||0,                 designNo:String(r[4]||""),
+      challanNo:challan,
+      deliveryPlace:String(r[6]||"").split(" / ")[0],
+      transporter:String(r[6]||"").split(" / ").slice(1).join(" / "),
+      lotNo:String(r[7]||""),        meters:+r[8]||0,  rate:+r[9]||0,
+      taxable:+r[10]||0,             discountPct:+r[11]||0,
+      discAmt:+r[12]||0,             afterDisc:+r[13]||0,
+      sgst:+r[14]||0,                cgst:+r[15]||0,   total:+r[16]||0,
+      amountReceived:rcvd,           payments:ae.payments||[],
+      paymentStatus:String(r[18]||"Pending"),
+      remarks:String(r[19]||"")
+    };
+  });
 }
 
 function OdSync({disp,firm,firmName,onPull}){
