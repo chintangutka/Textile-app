@@ -2843,25 +2843,40 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     setSyncing(false);
   }
 
-  // OneDrive Excel pull handler
+  // OneDrive Excel pull — handles firm changes from All Entries
   async function handleOdPull(rows){
-    if(!rows||rows.length===0){toast2("Excel: 0 rows found for this firm","err");return;}
-    let added=0,updated=0;
-    for(const row of rows){
+    if(!rows||rows.length===0){toast2("Excel: nothing in All Entries yet — Push first","err");return;}
+    const firmRows=rows.filter(r=>r._excelFirm===FIRMS[firm].name);
+    const movedRows=rows.filter(r=>r._excelFirm&&r._excelFirm!==FIRMS[firm].name);
+    let added=0,updated=0,moved=0;
+    // Update/add current firm entries
+    for(const row of firmRows){
       if(!row.challanNo)continue;
-      const ex=disp.find(d=>d.challanNo&&String(d.challanNo)===String(row.challanNo));
-      const total=+row.total||0;
-      const rcvd=+row.amountReceived||row.payments.reduce((s,p)=>s+(+p.amount||0),0)||0;
-      const merged={...row,amountReceived:rcvd,paymentStatus:calcPmt(rcvd,total)};
-      if(ex){
-        await dbUpdate(firm,"dispatch",ex._id,{...ex,...merged,payments:merged.payments});
-        updated++;
-      } else {
-        await dbs(firm,"dispatch",uid(),merged);
-        added++;
+      const ex=disp.find(d=>String(d.challanNo)===String(row.challanNo));
+      const rcvd=row.amountReceived||row.payments.reduce((s,p)=>s+(+p.amount||0),0)||0;
+      const merged={...row,amountReceived:rcvd,paymentStatus:calcPmt(rcvd,+row.total||0)};
+      delete merged._excelFirm;
+      if(ex){await dbUpdate(firm,"dispatch",ex._id,{...ex,...merged,payments:merged.payments});updated++;}
+      else{await dbs(firm,"dispatch",uid(),merged);added++;}
+    }
+    // Handle firm changes: entry was in this firm's Firestore but now Excel says different firm
+    for(const row of movedRows){
+      if(!row.challanNo)continue;
+      const ex=disp.find(d=>String(d.challanNo)===String(row.challanNo));
+      if(!ex)continue; // wasn't in this firm anyway
+      // Delete from current firm
+      await dbd(firm,"dispatch",ex._id);
+      // Add to new firm
+      const newFirmKey=Object.keys(FIRMS).find(k=>FIRMS[k].name===row._excelFirm);
+      if(newFirmKey){
+        const rcvd=row.amountReceived||row.payments.reduce((s,p)=>s+(+p.amount||0),0)||0;
+        const merged={...row,amountReceived:rcvd,paymentStatus:calcPmt(rcvd,+row.total||0)};
+        delete merged._excelFirm;
+        await dbs(newFirmKey,"dispatch",uid(),merged);
+        moved++;
       }
     }
-    toast2("Excel pulled: "+rows.length+" rows ("+updated+" updated, "+added+" added)");
+    toast2("Excel: "+updated+" updated, "+added+" added, "+moved+" moved");
   }
 
   // Computed
@@ -3372,8 +3387,8 @@ async function odPush(disp,tok,firmName){
     "Delivery Place & Transport","Lot No.","Total Meters","Rate (₹)","Taxable Amount (₹)",
     "Discount (%)","Discount Amt (₹)","After Discount (₹)","SGST 2.5% (₹)","CGST 2.5% (₹)",
     "Total Amount (₹)","Amt Rcvd (₹)","Payment Status","Remarks"]];
-  const SC={"Received":["#C6EFCE","#276221"],"Partial":["#FFEB9C","#9C6500"],
-            "Pending":["#FFC7CE","#9C0006"],"Excess":["#BDD7EE","#2E75B6"]};
+  const SC={"Received":["#D9EAD3","#2D6A2D"],"Partial":["#FFF2CC","#7D6608"],
+            "Pending":["#FCE8E8","#A61C00"],"Excess":["#E4DFEC","#5B2C8D"]};
 
   // Build 20-col firm rows from disp (firm sheet only, no Firm column)
   const firmRows=disp.map((r,i)=>{
@@ -3443,9 +3458,8 @@ async function odPush(disp,tok,firmName){
 async function odPull(tok,firmName){
   const item=await odFileItem(tok);
   const dId=item.parentReference.driveId,iId=item.id;
-  // Read directly from firm sheet (20 cols A-T, data from row 5)
-  const d=await gql(dId,iId,tok,firmName,"/range(address='A"+OD_DR+":T300')/values","GET");
-  
+  // Always read from All Entries (master with firm column + instalment cols)
+  const d=await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB300')/values","GET");
   function exDate(v){
     if(!v)return"";
     if(typeof v==="number"&&v>1000){
@@ -3456,25 +3470,26 @@ async function odPull(tok,firmName){
     const pd=new Date(s);
     return isNaN(pd.getTime())?s.slice(0,10):pd.toISOString().split("T")[0];
   }
-
-  // Firm sheet 20 cols (0-indexed):
-  // 0:Sr 1:Date 2:Party 3:Taka 4:Quality 5:Challan 6:Delivery 7:Lot
-  // 8:Meters 9:Rate 10:Taxable 11:Disc% 12:DiscAmt 13:AfterDisc
-  // 14:SGST 15:CGST 16:Total 17:Rcvd 18:Status 19:Remarks
-  return(d.value||[]).filter(r=>r[5]).map(r=>({
-    date:exDate(r[1])||today(),
-    customer:String(r[2]||""),   taka:+r[3]||0,
-    designNo:String(r[4]||""),   challanNo:String(r[5]||""),
-    deliveryPlace:String(r[6]||"").split(" / ")[0],
-    transporter:String(r[6]||"").split(" / ").slice(1).join(" / "),
-    lotNo:String(r[7]||""),      meters:+r[8]||0,   rate:+r[9]||0,
-    taxable:+r[10]||0,           discountPct:+r[11]||0,
-    discAmt:+r[12]||0,           afterDisc:+r[13]||0,
-    sgst:+r[14]||0,              cgst:+r[15]||0,    total:+r[16]||0,
-    amountReceived:+r[17]||0,
-    paymentStatus:String(r[18]||"Pending"),
-    remarks:String(r[19]||""),
-    payments:[] // instalment detail not in firm sheet; use Pull from All Entries for that
+  // Return ALL rows (current firm + other firms) for firm-change detection
+  return(d.value||[]).filter(r=>r[6]).map(r=>({
+    _excelFirm:String(r[2]||""),
+    date:exDate(r[1])||today(),   customer:String(r[3]||""),
+    taka:+r[4]||0,                designNo:String(r[5]||""),
+    challanNo:String(r[6]||""),
+    deliveryPlace:String(r[7]||"").split(" / ")[0],
+    transporter:String(r[7]||"").split(" / ").slice(1).join(" / "),
+    lotNo:String(r[8]||""),       meters:+r[9]||0,   rate:+r[10]||0,
+    taxable:+r[11]||0,            discountPct:+r[12]||0,
+    discAmt:+r[13]||0,            afterDisc:+r[14]||0,
+    sgst:+r[15]||0,               cgst:+r[16]||0,    total:+r[17]||0,
+    payments:[
+      +r[19]>0?{id:uid(),date:exDate(r[18])||today(),amount:+r[19],note:"Excel"}:null,
+      +r[21]>0?{id:uid(),date:exDate(r[20])||today(),amount:+r[21],note:"Excel"}:null,
+      +r[23]>0?{id:uid(),date:exDate(r[22])||today(),amount:+r[23],note:"Excel"}:null
+    ].filter(Boolean),
+    amountReceived:+r[24]||0,
+    paymentStatus:String(r[26]||"Pending"),
+    remarks:String(r[27]||"")
   }));
 }
 
