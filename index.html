@@ -3420,6 +3420,7 @@ async function odPush(disp,tok,firmName){
   // Build 20-col firm rows - CORRECT column letters: I=Meters, J=Rate
   const firmRows=disp.map((r,i)=>{
     const row2=OD_DR+i;  // actual Excel row number for this firm sheet row
+    const rcvd=+r.amountReceived||0;
     const total=+r.total||0;
     const actualStatus=calcPmt(rcvd,total); // recalculate, don't use stale paymentStatus
     return[i+1,r.date||"",r.customer||"",+r.taka||0,r.designNo||"",r.challanNo||"",
