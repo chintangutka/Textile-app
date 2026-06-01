@@ -3453,6 +3453,14 @@ async function odPush(disp,tok,firmName){
     try{if(fill)await gql(dId,iId,tok,ws,base+"/fill","PATCH",{color:fill});}catch(e){}
     try{if(font)await gql(dId,iId,tok,ws,base+"/font","PATCH",font);}catch(e){}
   }
+  // Apply fill+font to each row in list individually (Graph API doesn't support non-contiguous ranges)
+  async function fmtRows(ws,rowList,colLetter,fill,font){
+    for(const row of rowList){
+      const addr=colLetter+row;
+      try{await gql(dId,iId,tok,ws,"/range(address='"+addr+"')/format/fill","PATCH",{color:fill});}catch(e){}
+      try{if(font)await gql(dId,iId,tok,ws,"/range(address='"+addr+"')/format/font","PATCH",font);}catch(e){}
+    }
+  }
 
   // ── Format All Entries ─────────────────────────────────
   const AE="All Entries";
@@ -3478,9 +3486,10 @@ async function odPush(disp,tok,firmName){
     const row=fStart+i;
     (byStatus[st]=byStatus[st]||[]).push(row);
   });
+  // Status colors — each row individually (Graph API limitation: no non-contiguous ranges)
   for(const[st,rows2]of Object.entries(byStatus)){
     const[bg,fc]=SC[st]||SC["Pending"];
-    await fmt(AE,rows2.map(r=>"AA"+r).join(","),bg,{color:fc,bold:true});
+    await fmtRows(AE,rows2,"AA",bg,{color:fc,bold:true});
   }
 
   // ── Format Firm Sheet ──────────────────────────────────
@@ -3493,9 +3502,10 @@ async function odPush(disp,tok,firmName){
     const row=OD_DR+i;
     (byStatus2[st]=byStatus2[st]||[]).push(row);
   });
+  // Status colors — each row individually
   for(const[st,rows2]of Object.entries(byStatus2)){
     const[bg,fc]=SC[st]||SC["Pending"];
-    await fmt(firmName,rows2.map(r=>"S"+r).join(","),bg,{color:fc,bold:true});
+    await fmtRows(firmName,rows2,"S",bg,{color:fc,bold:true});
   }
 
   return newRows.length;
