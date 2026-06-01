@@ -3414,8 +3414,6 @@ async function odPush(disp,tok,firmName){
     "Delivery Place & Transport","Lot No.","Total Meters","Rate (₹)","Taxable Amount (₹)",
     "Discount (%)","Discount Amt (₹)","After Discount (₹)","SGST 2.5% (₹)","CGST 2.5% (₹)",
     "Total Amount (₹)","Amt Rcvd (₹)","Payment Status","Remarks"]];
-  const SC={"Received":["#D9EAD3","#2D6A2D"],"Partial":["#FFF2CC","#7D6608"],
-            "Pending":["#FCE8E8","#A61C00"],"Excess":["#E4DFEC","#5B2C8D"]};
 
   // Build 20-col firm rows
   // R=Rcvd uses VLOOKUP into All Entries col G(Challan)→Y(Rcvd), offset=19
@@ -3450,18 +3448,35 @@ async function odPush(disp,tok,firmName){
     }
   }catch(e){console.warn("Firm sheet write:",e.message);}
 
-  // ── Format helper ──────────────────────────────────────
-  async function fmt(ws,addr,fill,font){
+  // ── Format helpers ─────────────────────────────────────
+  // Apply fill+font to a single range
+  async function fmtRange(ws,addr,fill,font){
     const base="/range(address='"+addr+"')/format";
     try{if(fill)await gql(dId,iId,tok,ws,base+"/fill","PATCH",{color:fill});}catch(e){}
     try{if(font)await gql(dId,iId,tok,ws,base+"/font","PATCH",font);}catch(e){}
   }
-  // Apply fill+font to each row in list individually (Graph API doesn't support non-contiguous ranges)
-  async function fmtRows(ws,rowList,colLetter,fill,font){
-    for(const row of rowList){
-      const addr=colLetter+row;
-      try{await gql(dId,iId,tok,ws,"/range(address='"+addr+"')/format/fill","PATCH",{color:fill});}catch(e){}
-      try{if(font)await gql(dId,iId,tok,ws,"/range(address='"+addr+"')/format/font","PATCH",font);}catch(e){}
+
+  // Apply 4 conditional format rules to a column range covering all data rows
+  async function applyStatusCondFmt(ws,colRange){
+    // Clear existing conditional formats first (suppress errors if none exist)
+    try{await gql(dId,iId,tok,ws,"/range(address='"+colRange+"')/conditionalFormats/clearAll","POST",{});}catch(e){}
+    // Add rules — higher priority number = lower priority; add in reverse so Received wins over Partial etc.
+    const rules=[
+      {val:"Received",fill:"#D9EAD3",font:"#1B5E20"},
+      {val:"Partial",  fill:"#FFF2CC",font:"#7D4F00"},
+      {val:"Pending",  fill:"#FCE8E8",font:"#A61C00"},
+      {val:"Excess",   fill:"#E4DFEC",font:"#4527A0"}
+    ];
+    for(let i=0;i<rules.length;i++){
+      const{val,fill,font}=rules[i];
+      try{
+        await gql(dId,iId,tok,ws,"/range(address='"+colRange+"')/conditionalFormats/add","POST",{
+          type:"CellValue",
+          priority:i+1,
+          cellValue:{operator:"Equal",formula1:'"'+val+'"'},
+          format:{fill:{color:fill},font:{color:font,bold:true}}
+        });
+      }catch(e){console.warn("condFmt "+val+":",e.message);}
     }
   }
 
@@ -3469,48 +3484,26 @@ async function odPush(disp,tok,firmName){
   const AE="All Entries";
   const totalDataRows=existingRows.length+newRows.length;
   const dataEnd=OD_DR+Math.max(totalDataRows-1,0);
-  await fmt(AE,"A4:AB4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
-  if(totalDataRows>0) await fmt(AE,"A"+OD_DR+":AB"+dataEnd,"#F8F9FA",null);
-  // Column group shading — alternating pastel colors per instalment pair
+  await fmtRange(AE,"A4:AB4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
   if(totalDataRows>0){
+    await fmtRange(AE,"A"+OD_DR+":AB"+dataEnd,"#F8F9FA",null);
     const dr=OD_DR+":"+dataEnd;
-    await fmt(AE,"A"+dr+":G"+dataEnd,"#F0F4FF",null);   // Sr–Delivery: light blue
-    await fmt(AE,"H"+dr+":K"+dataEnd,"#FFF8E1",null);   // Lot–Taxable: light yellow
-    await fmt(AE,"L"+dr+":R"+dataEnd,"#F3F9F3",null);   // Disc–Total: light green
-    await fmt(AE,"S"+dr+":T"+dataEnd,"#EDE7F6",null);   // I1: light purple
-    await fmt(AE,"U"+dr+":V"+dataEnd,"#E0F7FA",null);   // I2: light teal
-    await fmt(AE,"W"+dr+":X"+dataEnd,"#EDE7F6",null);   // I3: light purple
-    await fmt(AE,"Y"+dr+":Z"+dataEnd,"#FFF3E0",null);   // Rcvd/Balance: light orange
+    await fmtRange(AE,"A"+OD_DR+":G"+dataEnd,"#F0F4FF",null);
+    await fmtRange(AE,"H"+OD_DR+":K"+dataEnd,"#FFF8E1",null);
+    await fmtRange(AE,"L"+OD_DR+":R"+dataEnd,"#F3F9F3",null);
+    await fmtRange(AE,"S"+OD_DR+":T"+dataEnd,"#EDE7F6",null);
+    await fmtRange(AE,"U"+OD_DR+":V"+dataEnd,"#E0F7FA",null);
+    await fmtRange(AE,"W"+OD_DR+":X"+dataEnd,"#EDE7F6",null);
+    await fmtRange(AE,"Y"+OD_DR+":Z"+dataEnd,"#FFF3E0",null);
   }
-  // Status colors: use recalculated status (not stale paymentStatus)
-  const byStatus={};
-  disp.forEach((d,i)=>{
-    const st=calcPmt(+d.amountReceived||0,+d.total||0);
-    const row=fStart+i;
-    (byStatus[st]=byStatus[st]||[]).push(row);
-  });
-  // Status colors — each row individually (Graph API limitation: no non-contiguous ranges)
-  for(const[st,rows2]of Object.entries(byStatus)){
-    const[bg,fc]=SC[st]||SC["Pending"];
-    await fmtRows(AE,rows2,"AA",bg,{color:fc,bold:true});
-  }
+  // Conditional formatting on Status col AA — auto-colors when formula recalculates
+  await applyStatusCondFmt(AE,"AA"+OD_DR+":AA300");
 
   // ── Format Firm Sheet ──────────────────────────────────
-  await fmt(firmName,"A4:T4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
-  // Apply base row background FIRST
-  if(firmRows.length) await fmt(firmName,"A"+OD_DR+":T"+(OD_DR-1+firmRows.length),"#EBF3FB",null);
-  // Status colors on col S LAST (overwrites base background on that column only)
-  const byStatus2={};
-  disp.forEach((d,i)=>{
-    const st=calcPmt(+d.amountReceived||0,+d.total||0);
-    const row=OD_DR+i;
-    (byStatus2[st]=byStatus2[st]||[]).push(row);
-  });
-  // Each row individually — also color the full row range for status visibility
-  for(const[st,rows2]of Object.entries(byStatus2)){
-    const[bg,fc]=SC[st]||SC["Pending"];
-    await fmtRows(firmName,rows2,"S",bg,{color:fc,bold:true});
-  }
+  await fmtRange(firmName,"A4:T4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
+  if(firmRows.length) await fmtRange(firmName,"A"+OD_DR+":T"+(OD_DR-1+firmRows.length),"#EBF3FB",null);
+  // Conditional formatting on Status col S — auto-colors whenever VLOOKUP Rcvd changes
+  await applyStatusCondFmt(firmName,"S"+OD_DR+":S300");
 
   return newRows.length;
 }
