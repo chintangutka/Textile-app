@@ -3417,23 +3417,26 @@ async function odPush(disp,tok,firmName){
   const SC={"Received":["#D9EAD3","#2D6A2D"],"Partial":["#FFF2CC","#7D6608"],
             "Pending":["#FCE8E8","#A61C00"],"Excess":["#E4DFEC","#5B2C8D"]};
 
-  // Build 20-col firm rows - CORRECT column letters: I=Meters, J=Rate
+  // Build 20-col firm rows
+  // R=Rcvd uses VLOOKUP into All Entries col G(Challan)→Y(Rcvd), offset=19
+  // S=Status derived from this sheet's Q(Total) and R(Rcvd) so it auto-updates when AE changes
   const firmRows=disp.map((r,i)=>{
-    const row2=OD_DR+i;  // actual Excel row number for this firm sheet row
+    const row2=OD_DR+i;
     const rcvd=+r.amountReceived||0;
-    const total=+r.total||0;
-    const actualStatus=calcPmt(rcvd,total); // recalculate, don't use stale paymentStatus
+    const actualStatus=calcPmt(rcvd,+r.total||0);
+    const vlRcvd="=IFERROR(VLOOKUP(F"+row2+",'All Entries'!G:Y,19,0),"+rcvd+")";
+    const stFml="=IF(Q"+row2+'="","",IF(R'+row2+'<=0,"Pending",IF(R'+row2+'>Q'+row2+'*1.001,"Excess",IF(R'+row2+'>=Q'+row2+'*0.999,"Received","Partial"))))';
     return[i+1,r.date||"",r.customer||"",+r.taka||0,r.designNo||"",r.challanNo||"",
       (r.deliveryPlace||"")+(r.transporter?" / "+r.transporter:""),r.lotNo||"",
       +r.meters||0,+r.rate||0,
-      "=I"+row2+"*J"+row2,            // K:Taxable = Meters(I) × Rate(J)
-      +r.discountPct||0,               // L:Disc%
-      "=K"+row2+"*L"+row2+"/100",     // M:DiscAmt
-      "=K"+row2+"-M"+row2,            // N:AfterDisc
-      "=N"+row2+"*0.025",              // O:SGST
-      "=N"+row2+"*0.025",              // P:CGST
-      "=N"+row2+"+O"+row2+"+P"+row2,  // Q:Total
-      rcvd,actualStatus,r.remarks||""];
+      "=I"+row2+"*J"+row2,
+      +r.discountPct||0,
+      "=K"+row2+"*L"+row2+"/100",
+      "=K"+row2+"-M"+row2,
+      "=N"+row2+"*0.025",
+      "=N"+row2+"*0.025",
+      "=N"+row2+"+O"+row2+"+P"+row2,
+      vlRcvd, stFml, r.remarks||""];
   });
 
   try{
@@ -3494,15 +3497,16 @@ async function odPush(disp,tok,firmName){
 
   // ── Format Firm Sheet ──────────────────────────────────
   await fmt(firmName,"A4:T4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
+  // Apply base row background FIRST
   if(firmRows.length) await fmt(firmName,"A"+OD_DR+":T"+(OD_DR-1+firmRows.length),"#EBF3FB",null);
-  // Status colors (col S = position 18, direct fill per status group)
+  // Status colors on col S LAST (overwrites base background on that column only)
   const byStatus2={};
   disp.forEach((d,i)=>{
     const st=calcPmt(+d.amountReceived||0,+d.total||0);
     const row=OD_DR+i;
     (byStatus2[st]=byStatus2[st]||[]).push(row);
   });
-  // Status colors — each row individually
+  // Each row individually — also color the full row range for status visibility
   for(const[st,rows2]of Object.entries(byStatus2)){
     const[bg,fc]=SC[st]||SC["Pending"];
     await fmtRows(firmName,rows2,"S",bg,{color:fc,bold:true});
