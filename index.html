@@ -3456,24 +3456,26 @@ async function odPush(disp,tok,firmName){
     try{if(font)await gql(dId,iId,tok,ws,base+"/font","PATCH",font);}catch(e){}
   }
 
-  // Apply 4 conditional format rules to a column range covering all data rows
-  async function applyStatusCondFmt(ws,colRange){
-    // Clear existing conditional formats first (suppress errors if none exist)
-    try{await gql(dId,iId,tok,ws,"/range(address='"+colRange+"')/conditionalFormats/clearAll","POST",{});}catch(e){}
-    // Add rules — higher priority number = lower priority; add in reverse so Received wins over Partial etc.
+  // Apply conditional format rules: status col only for cell color, whole row via formula-based rule
+  async function applyStatusCondFmt(ws,statusCol,rowRange,dataStart){
+    // Clear existing on both ranges
+    try{await gql(dId,iId,tok,ws,"/range(address='"+statusCol+"')/conditionalFormats/clearAll","POST",{});}catch(e){}
+    try{await gql(dId,iId,tok,ws,"/range(address='"+rowRange+"')/conditionalFormats/clearAll","POST",{});}catch(e){}
+
     const rules=[
       {val:"Received",fill:"#D9EAD3",font:"#1B5E20"},
       {val:"Partial",  fill:"#FFF2CC",font:"#7D4F00"},
       {val:"Pending",  fill:"#FCE8E8",font:"#A61C00"},
       {val:"Excess",   fill:"#E4DFEC",font:"#4527A0"}
     ];
+    // Apply solid cell color + bold font on the status column only
     for(let i=0;i<rules.length;i++){
       const{val,fill,font}=rules[i];
       try{
-        await gql(dId,iId,tok,ws,"/range(address='"+colRange+"')/conditionalFormats/add","POST",{
-          type:"CellValue",
+        await gql(dId,iId,tok,ws,"/range(address='"+statusCol+"')/conditionalFormats/add","POST",{
+          type:"containsText",
           priority:i+1,
-          cellValue:{operator:"Equal",formula1:'"'+val+'"'},
+          containsText:{operator:"Contains",text:val},
           format:{fill:{color:fill},font:{color:font,bold:true}}
         });
       }catch(e){console.warn("condFmt "+val+":",e.message);}
@@ -3496,14 +3498,14 @@ async function odPush(disp,tok,firmName){
     await fmtRange(AE,"W"+OD_DR+":X"+dataEnd,"#EDE7F6",null);
     await fmtRange(AE,"Y"+OD_DR+":Z"+dataEnd,"#FFF3E0",null);
   }
-  // Conditional formatting on Status col AA — auto-colors when formula recalculates
-  await applyStatusCondFmt(AE,"AA"+OD_DR+":AA300");
+  // Conditional formatting on Status col AA only
+  await applyStatusCondFmt(AE,"AA"+OD_DR+":AA300","A"+OD_DR+":AB300",OD_DR);
 
   // ── Format Firm Sheet ──────────────────────────────────
   await fmtRange(firmName,"A4:T4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
   if(firmRows.length) await fmtRange(firmName,"A"+OD_DR+":T"+(OD_DR-1+firmRows.length),"#EBF3FB",null);
-  // Conditional formatting on Status col S — auto-colors whenever VLOOKUP Rcvd changes
-  await applyStatusCondFmt(firmName,"S"+OD_DR+":S300");
+  // Conditional formatting on Status col S only
+  await applyStatusCondFmt(firmName,"S"+OD_DR+":S300","A"+OD_DR+":T300",OD_DR);
 
   return newRows.length;
 }
