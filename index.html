@@ -3410,38 +3410,45 @@ async function odPush(disp,tok,firmName){
   // Step 6: Write data DIRECTLY to firm-specific sheet (no FILTER formula)
   // Firm sheet 20 cols: Sr,Date,Party,Taka,Quality,Challan,Delivery,Lot,Meters,Rate,
   //   Taxable,Disc%,DiscAmt,AfterDisc,SGST,CGST,Total,Rcvd,Status,Remarks
+  // Firm sheet 21 cols A:U — mirrors All Entries structure with Balance column added
+  // A=Sr B=Date C=Party D=Taka E=Quality F=Challan G=Delivery H=Lot
+  // I=Meters J=Rate K=Taxable L=Disc% M=DiscAmt N=AfterDisc O=SGST P=CGST
+  // Q=Total R=Rcvd S=Balance T=Status U=Remarks
   const fHdrs=[["Sr.No.","Date","Party Name","No. of Taka","Quality","Challan No.",
     "Delivery Place & Transport","Lot No.","Total Meters","Rate (₹)","Taxable Amount (₹)",
     "Discount (%)","Discount Amt (₹)","After Discount (₹)","SGST 2.5% (₹)","CGST 2.5% (₹)",
-    "Total Amount (₹)","Amt Rcvd (₹)","Payment Status","Remarks"]];
+    "Total Amount (₹)","Amt Rcvd (₹)","Balance (₹)","Payment Status","Remarks"]];
 
-  // Build 20-col firm rows
-  // R=Rcvd uses VLOOKUP into All Entries col G(Challan)→Y(Rcvd), offset=19
-  // S=Status derived from this sheet's Q(Total) and R(Rcvd) so it auto-updates when AE changes
   const firmRows=disp.map((r,i)=>{
     const row2=OD_DR+i;
     const rcvd=+r.amountReceived||0;
-    const actualStatus=calcPmt(rcvd,+r.total||0);
+    // R=Rcvd: VLOOKUP Challan(F) in All Entries G:Y (offset 19); fallback to app value
     const vlRcvd="=IFERROR(VLOOKUP(F"+row2+",'All Entries'!G:Y,19,0),"+rcvd+")";
+    // S=Balance: Total - Rcvd (same as All Entries col Z)
+    const balFml="=Q"+row2+"-R"+row2;
+    // T=Status: same formula as All Entries col AA
     const stFml="=IF(Q"+row2+'="","",IF(R'+row2+'<=0,"Pending",IF(R'+row2+'>Q'+row2+'*1.001,"Excess",IF(R'+row2+'>=Q'+row2+'*0.999,"Received","Partial"))))';
     return[i+1,r.date||"",r.customer||"",+r.taka||0,r.designNo||"",r.challanNo||"",
       (r.deliveryPlace||"")+(r.transporter?" / "+r.transporter:""),r.lotNo||"",
       +r.meters||0,+r.rate||0,
-      "=I"+row2+"*J"+row2,
-      +r.discountPct||0,
-      "=K"+row2+"*L"+row2+"/100",
-      "=K"+row2+"-M"+row2,
-      "=N"+row2+"*0.025",
-      "=N"+row2+"*0.025",
-      "=N"+row2+"+O"+row2+"+P"+row2,
-      vlRcvd, stFml, r.remarks||""];
+      "=I"+row2+"*J"+row2,          // K Taxable
+      +r.discountPct||0,             // L Disc%
+      "=K"+row2+"*L"+row2+"/100",   // M DiscAmt
+      "=K"+row2+"-M"+row2,           // N AfterDisc
+      "=N"+row2+"*0.025",            // O SGST
+      "=N"+row2+"*0.025",            // P CGST
+      "=N"+row2+"+O"+row2+"+P"+row2, // Q Total
+      vlRcvd,                         // R Rcvd
+      balFml,                         // S Balance
+      stFml,                          // T Status
+      r.remarks||""];                 // U Remarks
   });
 
   try{
-    await gql(dId,iId,tok,firmName,"/range(address='A4:T4')","PATCH",{values:fHdrs});
-    await gql(dId,iId,tok,firmName,"/range(address='A"+OD_DR+":T300')/clear","POST",{applyTo:"all"});
+    await gql(dId,iId,tok,firmName,"/range(address='A4:U4')","PATCH",{values:fHdrs});
+    await gql(dId,iId,tok,firmName,"/range(address='A"+OD_DR+":U300')/clear","POST",{applyTo:"all"});
     if(firmRows.length){
-      await gql(dId,iId,tok,firmName,"/range(address='A"+OD_DR+":T"+(OD_DR-1+firmRows.length)+"')","PATCH",
+      await gql(dId,iId,tok,firmName,"/range(address='A"+OD_DR+":U"+(OD_DR-1+firmRows.length)+"')","PATCH",
         {formulas:firmRows});
       await gql(dId,iId,tok,firmName,"/range(address='B"+OD_DR+":B300')","PATCH",
         {numberFormat:[["dd-mmm-yy"]]});
@@ -3456,29 +3463,39 @@ async function odPush(disp,tok,firmName){
     try{if(font)await gql(dId,iId,tok,ws,base+"/font","PATCH",font);}catch(e){}
   }
 
-  // Apply conditional format rules: status col only for cell color, whole row via formula-based rule
+  // Apply conditional format rules with correct Graph API body for fill+font
   async function applyStatusCondFmt(ws,statusCol,rowRange,dataStart){
-    // Clear existing on both ranges
     try{await gql(dId,iId,tok,ws,"/range(address='"+statusCol+"')/conditionalFormats/clearAll","POST",{});}catch(e){}
-    try{await gql(dId,iId,tok,ws,"/range(address='"+rowRange+"')/conditionalFormats/clearAll","POST",{});}catch(e){}
 
     const rules=[
-      {val:"Received",fill:"#D9EAD3",font:"#1B5E20"},
-      {val:"Partial",  fill:"#FFF2CC",font:"#7D4F00"},
-      {val:"Pending",  fill:"#FCE8E8",font:"#A61C00"},
-      {val:"Excess",   fill:"#E4DFEC",font:"#4527A0"}
+      {val:"Received",fill:"D9EAD3",font:"1B5E20"},
+      {val:"Partial",  fill:"FFF2CC",font:"7D4F00"},
+      {val:"Pending",  fill:"FCE8E8",font:"A61C00"},
+      {val:"Excess",   fill:"E4DFEC",font:"4527A0"}
     ];
-    // Apply solid cell color + bold font on the status column only
     for(let i=0;i<rules.length;i++){
       const{val,fill,font}=rules[i];
       try{
+        // Use 'custom' type with a formula — most reliable for fill+font via Graph API
         await gql(dId,iId,tok,ws,"/range(address='"+statusCol+"')/conditionalFormats/add","POST",{
-          type:"containsText",
+          type:"custom",
           priority:i+1,
-          containsText:{operator:"Contains",text:val},
-          format:{fill:{color:fill},font:{color:font,bold:true}}
+          custom:{rule:{formula:'=EXACT('+statusCol.split(':')[0]+',"'+val+'")'}},
+          format:{
+            fill:{color:"#"+fill},
+            font:{color:"#"+font,bold:true}
+          }
         });
-      }catch(e){console.warn("condFmt "+val+":",e.message);}
+      }catch(e){
+        // Fallback: containsText
+        try{
+          await gql(dId,iId,tok,ws,"/range(address='"+statusCol+"')/conditionalFormats/add","POST",{
+            type:"containsText",priority:i+1,
+            containsText:{operator:"Contains",text:val},
+            format:{fill:{color:"#"+fill},font:{color:"#"+font,bold:true}}
+          });
+        }catch(e2){console.warn("condFmt "+val+":",e2.message);}
+      }
     }
   }
 
@@ -3502,10 +3519,10 @@ async function odPush(disp,tok,firmName){
   await applyStatusCondFmt(AE,"AA"+OD_DR+":AA300","A"+OD_DR+":AB300",OD_DR);
 
   // ── Format Firm Sheet ──────────────────────────────────
-  await fmtRange(firmName,"A4:T4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
-  if(firmRows.length) await fmtRange(firmName,"A"+OD_DR+":T"+(OD_DR-1+firmRows.length),"#EBF3FB",null);
-  // Conditional formatting on Status col S only
-  await applyStatusCondFmt(firmName,"S"+OD_DR+":S300","A"+OD_DR+":T300",OD_DR);
+  await fmtRange(firmName,"A4:U4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
+  if(firmRows.length) await fmtRange(firmName,"A"+OD_DR+":U"+(OD_DR-1+firmRows.length),"#EBF3FB",null);
+  // Conditional formatting on Status col T only (S is now Balance)
+  await applyStatusCondFmt(firmName,"T"+OD_DR+":T300","A"+OD_DR+":U300",OD_DR);
 
   return newRows.length;
 }
@@ -3537,8 +3554,8 @@ async function odPull(tok,firmName){
     });
   }catch(e){console.warn("AE read:",e.message);}
 
-  // Read firm sheet (20 cols) for latest editable fields
-  const fs=await gql(dId,iId,tok,firmName,"/range(address='A"+OD_DR+":T300')/values","GET");
+  // Read firm sheet (21 cols A:U) for latest editable fields
+  const fs=await gql(dId,iId,tok,firmName,"/range(address='A"+OD_DR+":U300')/values","GET");
   const firmData=(fs.value||[]).filter(r=>r[5]);
 
   return firmData.map(r=>{
@@ -3557,8 +3574,8 @@ async function odPull(tok,firmName){
       discAmt:+r[12]||0,             afterDisc:+r[13]||0,
       sgst:+r[14]||0,                cgst:+r[15]||0,   total:+r[16]||0,
       amountReceived:rcvd,           payments:ae.payments||[],
-      paymentStatus:String(r[18]||"Pending"),
-      remarks:String(r[19]||"")
+      paymentStatus:String(r[19]||"Pending"), // col T (index 19)
+      remarks:String(r[20]||"")               // col U (index 20)
     };
   });
 }
