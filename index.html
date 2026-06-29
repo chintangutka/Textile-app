@@ -2921,7 +2921,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
         h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
           h("button",{className:"btn btn-sm",onClick:pullFromSheet,disabled:syncing},syncing?"⏳":"🔄 Pull from Sheet"),
           h("button",{className:"btn btn-sm",style:{background:"#1565C0",color:"#fff"},onClick:pushAll,disabled:syncing},"⬆ Push all to Sheet"),
-          h("a",{href:"https://1drv.ms/x/c/d88fff87125c45ba/IQBHbh44Es-5TaSA3xJ9dBXWAZzsreKVvcAwF5NgCR-hNWg",target:"_blank",className:"btn btn-sm"},"📂 Open Excel"),
+          h("a",{href:"https://1drv.ms/x/c/d88fff87125c45ba/IQAAP5GqSI77SL8vu2OZ4v6IAbJh_EmJREWhg4_4aRlL7tY",target:"_blank",className:"btn btn-sm"},"📂 Open Excel"),
           h(OdSync,{disp,firm,firmName:FIRMS[firm].name,onPull:handleOdPull,ref:odSyncRef}),
           h("input",{type:"file",accept:".xlsx,.xls,.csv",ref:impRef,style:{display:"none"},onChange:onExcelFile}),
           h("button",{className:"btn btn-sm btn-p",onClick:()=>impRef.current.click()},"⬆ Upload Excel")
@@ -3253,7 +3253,7 @@ function Td(child,cls=""){return h("td",{className:cls},child)}
 function Em(msg){return h("div",{className:"empty"},h("div",{className:"ei"},"📋"),h("p",null,msg))}
 
 // ── OneDrive Excel Sync ──────────────────────────────────
-const OD_FILE_URL="https://1drv.ms/x/c/d88fff87125c45ba/IQBHbh44Es-5TaSA3xJ9dBXWAZzsreKVvcAwF5NgCR-hNWg";
+const OD_FILE_URL="https://1drv.ms/x/c/d88fff87125c45ba/IQAAP5GqSI77SL8vu2OZ4v6IAbJh_EmJREWhg4_4aRlL7tY";
 const OD_CLIENT_ID="85ca9381-da7a-4696-9a8e-35578907c7f5";
 const OD_SCOPES=["Files.ReadWrite","User.Read"];
 let _odApp=null;
