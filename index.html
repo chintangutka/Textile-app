@@ -2588,8 +2588,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     }
   },[disp.length]);
 
-  // Google Sheet auto-poll disabled — Excel (OneDrive) is the only sync. (Was polling a dead endpoint every 10s.)
-  // useEffect removed; use the OneDrive Pull from Excel button instead.
+  // Google Sheet auto-poll disabled — Excel (OneDrive) is the only sync.
 
 
   function startEdit(r){
@@ -3358,7 +3357,7 @@ async function odPush(disp,tok,firmName){
 
   try{
     await gql(dId,iId,tok,firmName,"/range(address='A4:U4')","PATCH",{values:fHdrs});
-    await gql(dId,iId,tok,firmName,"/range(address='A"+OD_DR+":U300')/clear","POST",{applyTo:"all"});
+    await gql(dId,iId,tok,firmName,"/range(address='A"+OD_DR+":U300')/clear","POST",{applyTo:"contents"});
     if(firmRows.length){
       await gql(dId,iId,tok,firmName,"/range(address='A"+OD_DR+":U"+(OD_DR-1+firmRows.length)+"')","PATCH",
         {formulas:firmRows});
@@ -3411,30 +3410,10 @@ async function odPush(disp,tok,firmName){
     }
   }
 
-  // ── Format All Entries ─────────────────────────────────
-  const AE="All Entries";
-  const totalDataRows=existingRows.length+newRows.length;
-  const dataEnd=OD_DR+Math.max(totalDataRows-1,0);
-  await fmtRange(AE,"A4:AB4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
-  if(totalDataRows>0){
-    await fmtRange(AE,"A"+OD_DR+":AB"+dataEnd,"#F8F9FA",null);
-    const dr=OD_DR+":"+dataEnd;
-    await fmtRange(AE,"A"+OD_DR+":G"+dataEnd,"#F0F4FF",null);
-    await fmtRange(AE,"H"+OD_DR+":K"+dataEnd,"#FFF8E1",null);
-    await fmtRange(AE,"L"+OD_DR+":R"+dataEnd,"#F3F9F3",null);
-    await fmtRange(AE,"S"+OD_DR+":T"+dataEnd,"#EDE7F6",null);
-    await fmtRange(AE,"U"+OD_DR+":V"+dataEnd,"#E0F7FA",null);
-    await fmtRange(AE,"W"+OD_DR+":X"+dataEnd,"#EDE7F6",null);
-    await fmtRange(AE,"Y"+OD_DR+":Z"+dataEnd,"#FFF3E0",null);
-  }
-  // Conditional formatting on Status col AA only
-  await applyStatusCondFmt(AE,"AA"+OD_DR+":AA300","A"+OD_DR+":AB300",OD_DR);
-
-  // ── Format Firm Sheet ──────────────────────────────────
-  await fmtRange(firmName,"A4:U4","#1F3864",{color:"#FFFFFF",bold:true,size:10});
-  if(firmRows.length) await fmtRange(firmName,"A"+OD_DR+":U"+(OD_DR-1+firmRows.length),"#EBF3FB",null);
-  // Conditional formatting on Status col T only (S is now Balance)
-  await applyStatusCondFmt(firmName,"T"+OD_DR+":T300","A"+OD_DR+":U300",OD_DR);
+  // ── Formatting intentionally NOT applied by Push ─────────────
+  // Push writes values/formulas only. All cell formatting, alignment, and
+  // conditional formatting are left to the user and preserved across pushes.
+  // (The firm-sheet clear above uses applyTo:"contents" so formatting survives.)
 
   return newRows.length;
 }
