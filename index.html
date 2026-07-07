@@ -3417,20 +3417,26 @@ async function odPull(tok,firmName){
     return isNaN(pd.getTime())?s.slice(0,10):pd.toISOString().split("T")[0];
   }
 
-  // ── Read ALL ENTRIES as the single source of truth (A:AA, 27 cols) ──
+  // ── Read ALL ENTRIES via usedRange (returns exactly the populated cells) ──
   // Confirmed layout: 0 Sr.No, 1 Date, 2 Firm, 3 Party, 4 Taka, 5 Quality,
   // 6 Challan, 7 Delivery&Transport, 8 Lot, 9 Meters, 10 Rate, 11 Taxable,
   // 12 Disc%, 13 DiscAmt, 14 AfterDisc, 15 SGST, 16 CGST, 17 Total,
   // 18 I1Date,19 I1Amt,20 I2Date,21 I2Amt,22 I3Date,23 I3Amt,24 Rcvd,25 Balance,26 Status
-  const ae=await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AA300')/values","GET");
-  const rawAE=(ae.value||[]);
+  const ur=await gql(dId,iId,tok,"All Entries","/usedRange(valuesOnly=true)","GET");
+  const allVals=(ur&&ur.values)||[];
+  const startAddr=(ur&&ur.address)||""; // e.g. "All Entries!A1:AA8"
+  // Figure out which spreadsheet row the usedRange starts at (usually 1)
+  const m=startAddr.match(/!([A-Z]+)(\d+):/);
+  const firstRow=m?parseInt(m[2],10):1;
+  // We want data from spreadsheet row OD_DR (5) onward → offset within allVals
+  const skip=Math.max(0,OD_DR-firstRow);
+  const rawAE=allVals.slice(skip);
   // A row is real only if it has a Challan (col G / index 6)
-  const rows=rawAE.filter(r=>r[6]!==null&&r[6]!==undefined&&String(r[6]).trim()!=="");
-  console.log("[Pull] All Entries raw:",rawAE.length,"with challan(G):",rows.length,"| row5:",JSON.stringify(rawAE[0]),"| row6:",JSON.stringify(rawAE[1]));
-  // If nothing matched, throw a visible diagnostic showing the first non-empty row so we can see the real column layout
+  const rows=rawAE.filter(r=>r&&r[6]!==null&&r[6]!==undefined&&String(r[6]).trim()!=="");
+  console.log("[Pull] usedRange:",startAddr,"totalRows:",allVals.length,"afterSkip:",rawAE.length,"withChallan:",rows.length,"| firstData:",JSON.stringify(rawAE[0]));
   if(rows.length===0){
-    const firstNonEmpty=rawAE.find(r=>r&&r.some(c=>c!==""&&c!==null&&c!==undefined));
-    throw new Error("PULL-DIAG rawRows="+rawAE.length+" firstData="+JSON.stringify(firstNonEmpty));
+    const firstNonEmpty=allVals.find(r=>r&&r.some(c=>c!==""&&c!==null&&c!==undefined));
+    throw new Error("PULL-DIAG addr="+startAddr+" totalRows="+allVals.length+" firstData="+JSON.stringify(firstNonEmpty));
   }
 
   return rows.map(r=>{
