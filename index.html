@@ -2788,14 +2788,15 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
     if(!rows||rows.length===0){toast2("Excel: no rows found in All Entries","err");return;}
     const norm=s=>String(s||"").trim().toLowerCase();
     const myName=norm(FIRMS[firm].name);
-    // Only handle rows belonging to the firm currently being viewed.
+    // Rows for the firm currently being viewed
     const firmRows=rows.filter(r=>norm(r._excelFirm)===myName);
-    const otherCount=rows.filter(r=>r._excelFirm&&norm(r._excelFirm)!==myName).length;
-    if(firmRows.length===0){
-      toast2("Excel: no "+FIRMS[firm].name+" rows found"+(otherCount?" ("+otherCount+" belong to the other firm — switch firm & Pull)":""),"err");
-      return;
+    const otherRows=rows.filter(r=>r._excelFirm&&norm(r._excelFirm)!==myName);
+    const otherCount=otherRows.length;
+    if(firmRows.length===0&&otherCount===0){
+      toast2("Excel: no rows found","err");return;
     }
-    let added=0,updated=0;
+    let added=0,updated=0,removed=0;
+    // Add / update this firm's entries
     for(const row of firmRows){
       if(!row.challanNo)continue;
       const ex=disp.find(d=>String(d.challanNo)===String(row.challanNo));
@@ -2805,7 +2806,25 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
       if(ex){await dbUpdate(firm,"dispatch",ex._id,{...ex,...merged,payments:merged.payments});updated++;}
       else{await dbs(firm,"dispatch",uid(),merged);added++;}
     }
-    toast2("Excel → "+FIRMS[firm].name+": "+updated+" updated, "+added+" added"+(otherCount?" · "+otherCount+" for other firm (switch & Pull)":""));
+    // SAFE stale-removal: if an app entry in THIS firm has a challan that Excel now
+    // lists under a DIFFERENT firm, that entry was moved away → delete the stale copy.
+    // (Only triggers on a genuine move — never touches app-only entries not yet pushed.)
+    const movedChallans=new Set(otherRows.map(r=>String(r.challanNo)));
+    const myChallans=new Set(firmRows.map(r=>String(r.challanNo)));
+    for(const d of disp){
+      const c=String(d.challanNo||"");
+      if(!c)continue;
+      if(movedChallans.has(c)&&!myChallans.has(c)){
+        await dbd(firm,"dispatch",d._id);
+        removed++;
+      }
+    }
+    const parts=[];
+    if(updated)parts.push(updated+" updated");
+    if(added)parts.push(added+" added");
+    if(removed)parts.push(removed+" moved out");
+    if(!parts.length)parts.push("no changes");
+    toast2("Excel → "+FIRMS[firm].name+": "+parts.join(", ")+(otherCount?" · "+otherCount+" for other firm (switch & Pull)":""));
   }
 
   // Computed
