@@ -3426,7 +3426,12 @@ async function odPull(tok,firmName){
   const rawAE=(ae.value||[]);
   // A row is real only if it has a Challan (col G / index 6)
   const rows=rawAE.filter(r=>r[6]!==null&&r[6]!==undefined&&String(r[6]).trim()!=="");
-  console.log("[Pull] All Entries raw:",rawAE.length,"with challan(G):",rows.length,"| sample:",JSON.stringify(rawAE[0]));
+  console.log("[Pull] All Entries raw:",rawAE.length,"with challan(G):",rows.length,"| row5:",JSON.stringify(rawAE[0]),"| row6:",JSON.stringify(rawAE[1]));
+  // If nothing matched, throw a visible diagnostic showing the first non-empty row so we can see the real column layout
+  if(rows.length===0){
+    const firstNonEmpty=rawAE.find(r=>r&&r.some(c=>c!==""&&c!==null&&c!==undefined));
+    throw new Error("PULL-DIAG rawRows="+rawAE.length+" firstData="+JSON.stringify(firstNonEmpty));
+  }
 
   return rows.map(r=>{
     const challan=String(r[6]).trim();
