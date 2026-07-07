@@ -2785,11 +2785,17 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
 
   // OneDrive Excel pull — handles firm changes from All Entries
   async function handleOdPull(rows){
-    if(!rows||rows.length===0){toast2("Excel: nothing in All Entries yet — Push first","err");return;}
-    const firmRows=rows.filter(r=>r._excelFirm===FIRMS[firm].name);
-    const movedRows=rows.filter(r=>r._excelFirm&&r._excelFirm!==FIRMS[firm].name);
-    let added=0,updated=0,moved=0;
-    // Update/add current firm entries
+    if(!rows||rows.length===0){toast2("Excel: no rows found in All Entries","err");return;}
+    const norm=s=>String(s||"").trim().toLowerCase();
+    const myName=norm(FIRMS[firm].name);
+    // Only handle rows belonging to the firm currently being viewed.
+    const firmRows=rows.filter(r=>norm(r._excelFirm)===myName);
+    const otherCount=rows.filter(r=>r._excelFirm&&norm(r._excelFirm)!==myName).length;
+    if(firmRows.length===0){
+      toast2("Excel: no "+FIRMS[firm].name+" rows found"+(otherCount?" ("+otherCount+" belong to the other firm — switch firm & Pull)":""),"err");
+      return;
+    }
+    let added=0,updated=0;
     for(const row of firmRows){
       if(!row.challanNo)continue;
       const ex=disp.find(d=>String(d.challanNo)===String(row.challanNo));
@@ -2799,24 +2805,7 @@ function PDisp({firm,M,disp,fab,toast2,updM,fname}){
       if(ex){await dbUpdate(firm,"dispatch",ex._id,{...ex,...merged,payments:merged.payments});updated++;}
       else{await dbs(firm,"dispatch",uid(),merged);added++;}
     }
-    // Handle firm changes: entry was in this firm's Firestore but now Excel says different firm
-    for(const row of movedRows){
-      if(!row.challanNo)continue;
-      const ex=disp.find(d=>String(d.challanNo)===String(row.challanNo));
-      if(!ex)continue; // wasn't in this firm anyway
-      // Delete from current firm
-      await dbd(firm,"dispatch",ex._id);
-      // Add to new firm
-      const newFirmKey=Object.keys(FIRMS).find(k=>FIRMS[k].name===row._excelFirm);
-      if(newFirmKey){
-        const rcvd=row.amountReceived||row.payments.reduce((s,p)=>s+(+p.amount||0),0)||0;
-        const merged={...row,amountReceived:rcvd,paymentStatus:calcPmt(rcvd,+row.total||0)};
-        delete merged._excelFirm;
-        await dbs(newFirmKey,"dispatch",uid(),merged);
-        moved++;
-      }
-    }
-    toast2("Excel: "+updated+" updated, "+added+" added, "+moved+" moved");
+    toast2("Excel → "+FIRMS[firm].name+": "+updated+" updated, "+added+" added"+(otherCount?" · "+otherCount+" for other firm (switch & Pull)":""));
   }
 
   // Computed
@@ -3428,45 +3417,48 @@ async function odPull(tok,firmName){
     return isNaN(pd.getTime())?s.slice(0,10):pd.toISOString().split("T")[0];
   }
 
-  // Read All Entries (28 cols) for instalment details + firm changes
-  let aeMap={};
-  try{
-    const ae=await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB300')/values","GET");
-    (ae.value||[]).filter(r=>r[6]).forEach(r=>{
-      aeMap[String(r[6])]={
-        _excelFirm:String(r[2]||""),
-        payments:[
-          +r[19]>0?{id:uid(),date:exDate(r[18])||today(),amount:+r[19],note:"Excel"}:null,
-          +r[21]>0?{id:uid(),date:exDate(r[20])||today(),amount:+r[21],note:"Excel"}:null,
-          +r[23]>0?{id:uid(),date:exDate(r[22])||today(),amount:+r[23],note:"Excel"}:null
-        ].filter(Boolean),
-        amountReceived:+r[24]||0
-      };
-    });
-  }catch(e){console.warn("AE read:",e.message);}
+  // ── Read ALL ENTRIES as the single source of truth (A:AA, 27 cols) ──
+  // Confirmed layout: 0 Sr.No, 1 Date, 2 Firm, 3 Party, 4 Taka, 5 Quality,
+  // 6 Challan, 7 Delivery&Transport, 8 Lot, 9 Meters, 10 Rate, 11 Taxable,
+  // 12 Disc%, 13 DiscAmt, 14 AfterDisc, 15 SGST, 16 CGST, 17 Total,
+  // 18 I1Date,19 I1Amt,20 I2Date,21 I2Amt,22 I3Date,23 I3Amt,24 Rcvd,25 Balance,26 Status
+  const ae=await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AA300')/values","GET");
+  const rawAE=(ae.value||[]);
+  // A row is real only if it has a Challan (col G / index 6)
+  const rows=rawAE.filter(r=>r[6]!==null&&r[6]!==undefined&&String(r[6]).trim()!=="");
+  console.log("[Pull] All Entries raw:",rawAE.length,"with challan(G):",rows.length,"| sample:",JSON.stringify(rawAE[0]));
 
-  // Read firm sheet (21 cols A:U) for latest editable fields
-  const fs=await gql(dId,iId,tok,firmName,"/range(address='A"+OD_DR+":U300')/values","GET");
-  const firmData=(fs.value||[]).filter(r=>r[5]);
-
-  return firmData.map(r=>{
-    const challan=String(r[5]||"");
-    const ae=aeMap[challan]||{};
-    const rcvd=ae.amountReceived||+r[17]||0;
+  return rows.map(r=>{
+    const challan=String(r[6]).trim();
+    const payments=[
+      +r[19]>0?{id:uid(),date:exDate(r[18])||today(),amount:+r[19],note:"Excel"}:null,
+      +r[21]>0?{id:uid(),date:exDate(r[20])||today(),amount:+r[21],note:"Excel"}:null,
+      +r[23]>0?{id:uid(),date:exDate(r[22])||today(),amount:+r[23],note:"Excel"}:null
+    ].filter(Boolean);
+    const rcvd=+r[24]||payments.reduce((s,p)=>s+(+p.amount||0),0)||0;
+    const dlv=String(r[7]||"");
     return{
-      _excelFirm:ae._excelFirm||firmName,
-      date:exDate(r[1])||today(),    customer:String(r[2]||""),
-      taka:+r[3]||0,                 designNo:String(r[4]||""),
+      _excelFirm:String(r[2]||"").trim(),   // Firm column — controls routing
+      date:exDate(r[1])||today(),
+      customer:String(r[3]||""),            // Party
+      taka:+r[4]||0,
+      designNo:String(r[5]||""),            // Quality
       challanNo:challan,
-      deliveryPlace:String(r[6]||"").split(" / ")[0],
-      transporter:String(r[6]||"").split(" / ").slice(1).join(" / "),
-      lotNo:String(r[7]||""),        meters:+r[8]||0,  rate:+r[9]||0,
-      taxable:+r[10]||0,             discountPct:+r[11]||0,
-      discAmt:+r[12]||0,             afterDisc:+r[13]||0,
-      sgst:+r[14]||0,                cgst:+r[15]||0,   total:+r[16]||0,
-      amountReceived:rcvd,           payments:ae.payments||[],
-      paymentStatus:String(r[19]||"Pending"), // col T (index 19)
-      remarks:String(r[20]||"")               // col U (index 20)
+      deliveryPlace:dlv.split(" / ")[0],
+      transporter:dlv.split(" / ").slice(1).join(" / "),
+      lotNo:String(r[8]||""),
+      meters:+r[9]||0,
+      rate:+r[10]||0,
+      taxable:+r[11]||0,
+      discountPct:+r[12]||0,
+      discAmt:+r[13]||0,
+      afterDisc:+r[14]||0,
+      sgst:+r[15]||0,
+      cgst:+r[16]||0,
+      total:+r[17]||0,
+      amountReceived:rcvd,
+      payments:payments
+      // paymentStatus is recomputed in handleOdPull via calcPmt(rcvd,total)
     };
   });
 }
