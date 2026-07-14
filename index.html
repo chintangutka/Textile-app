@@ -3283,29 +3283,44 @@ async function odPush(disp,tok,firmName){
   const item=await odFileItem(tok);
   const dId=item.parentReference.driveId,iId=item.id;
 
-  // Step 1: Read existing All Entries to preserve OTHER firm's rows
+  // Step 1: Read existing All Entries (via usedRange) to preserve OTHER firm's rows
   let existingRows=[];
   try{
-    const d=await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB200')/values","GET");
-    existingRows=(d.value||[]).filter(r=>r[2]&&r[2]!==firmName&&r[6]); // keep other firm rows
+    const ur=await gql(dId,iId,tok,"All Entries","/usedRange(valuesOnly=true)","GET");
+    const allVals=(ur&&ur.values)||[];
+    const startAddr=(ur&&ur.address)||"";
+    const m=startAddr.match(/!([A-Z]+)(\d+):/);
+    const firstRow=m?parseInt(m[2],10):1;
+    const skip=Math.max(0,OD_DR-firstRow);
+    const dataVals=allVals.slice(skip);
+    // Keep rows that belong to the OTHER firm (Firm col index 2) and have a Challan (index 6)
+    existingRows=dataVals.filter(r=>r&&r[2]&&String(r[2]).trim()!==String(firmName).trim()&&r[6]!==null&&r[6]!==undefined&&String(r[6]).trim()!=="");
+    console.log("[Push] preserved other-firm rows:",existingRows.length,"| addr:",startAddr);
   }catch(e){console.warn("Could not read existing rows",e.message);}
 
   // Step 2: Build current firm rows
   const newRows=odBuildRows(disp,firmName);
 
   // Step 3: Combine — other firm rows first (as plain values), then current firm (with formulas)
-  // Re-number Sr for combined
-  const combined=[...existingRows.map((r,i)=>[i+1,...r.slice(1)]),...newRows.map((r,i)=>[existingRows.length+i+1,...r.slice(1)])];
-
   // Step 4: Write headers + data to All Entries
   const hdrs=[["Sr","Date","Firm","Party","Taka","Quality","Challan","Delivery & Transport","Lot","Meters","Rate","Taxable","Disc%","DiscAmt","AfterDisc","SGST 2.5%","CGST 2.5%","Total","I1Date","I1Amt","I2Date","I2Amt","I3Date","I3Amt","Rcvd","Balance","Status","Remarks"]];
   await gql(dId,iId,tok,"All Entries","/range(address='A4:AB4')","PATCH",{values:hdrs});
   await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB300')/clear","POST",{applyTo:"contents"});
 
+  // Step 4a: Write preserved OTHER-firm rows first, as plain values (re-numbered).
+  if(existingRows.length){
+    const otherVals=existingRows.map((r,i)=>{
+      const out=[i+1]; // Sr
+      for(let c=1;c<28;c++)out.push(r[c]!==undefined?r[c]:"");
+      return out;
+    });
+    await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB"+(OD_DR-1+otherVals.length)+"')","PATCH",{values:otherVals});
+  }
+
+  // Step 4b: Write CURRENT-firm rows with live formulas, after the preserved rows.
   const fStart=OD_DR+existingRows.length;
-  if(combined.length){
+  if(newRows.length){
     const fmlRows=newRows.map((r,i)=>{
-      // Recalculate row references for correct row numbers
       const row=fStart+i;
       return[existingRows.length+i+1,r[1],r[2],r[3],r[4],r[5],r[6],r[7],r[8],r[9],r[10],
         "=J"+row+"*K"+row,r[12],"=L"+row+"*M"+row+"/100","=L"+row+"-N"+row,
