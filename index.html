@@ -3307,14 +3307,22 @@ async function odPush(disp,tok,firmName){
   await gql(dId,iId,tok,"All Entries","/range(address='A4:AB4')","PATCH",{values:hdrs});
   await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB300')/clear","POST",{applyTo:"contents"});
 
-  // Step 4a: Write preserved OTHER-firm rows first, as plain values (re-numbered).
+  // Step 4a: Write preserved OTHER-firm rows first, WITH live formulas (re-numbered).
+  // Raw inputs come from the existing values; all calculated columns are regenerated
+  // as formulas so nothing is ever converted from a formula to a static value.
   if(existingRows.length){
-    const otherVals=existingRows.map((r,i)=>{
-      const out=[i+1]; // Sr
-      for(let c=1;c<28;c++)out.push(r[c]!==undefined?r[c]:"");
-      return out;
+    const otherFml=existingRows.map((r,i)=>{
+      const row=OD_DR+i;
+      return[i+1,r[1],r[2],r[3],r[4],r[5],r[6],r[7],r[8],r[9],r[10],
+        "=J"+row+"*K"+row,r[12],"=L"+row+"*M"+row+"/100","=L"+row+"-N"+row,
+        "=O"+row+"*0.025","=O"+row+"*0.025","=O"+row+"+P"+row+"+Q"+row,
+        r[18],r[19],r[20],r[21],r[22],r[23],
+        "=IFERROR(T"+row+"+V"+row+"+X"+row+",0)",
+        "=R"+row+"-Y"+row,
+        "=IF(R"+row+'="","",IF(Y'+row+'<=0,"Pending",IF(Y'+row+'>R'+row+'*1.001,"Excess",IF(Y'+row+'>=R'+row+'*0.999,"Received","Partial"))))',
+        r[27]];
     });
-    await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB"+(OD_DR-1+otherVals.length)+"')","PATCH",{values:otherVals});
+    await gql(dId,iId,tok,"All Entries","/range(address='A"+OD_DR+":AB"+(OD_DR-1+otherFml.length)+"')","PATCH",{formulas:otherFml});
   }
 
   // Step 4b: Write CURRENT-firm rows with live formulas, after the preserved rows.
