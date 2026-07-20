@@ -888,6 +888,8 @@ function PIss({firm,M,parties,iss,inw,toast2,updM,fname,yBal}){
   const[srch,setSrch]=useState("");
   const pickP=(name)=>{const p=parties.find(x=>x.name===name);sf(prev=>({...prev,issuedTo:name,issueType:p?p.type:""}))};
 
+  // origQty must be declared before gdYarnMap uses it (edit mode adds back original qty)
+  const origQty=editId?+(iss.find(r=>r._id===editId)?.qty||0):0;
   // Compute yarns available in selected godown (with effective qty for edit mode)
   const gdYarnMap=f.godown?{}:null;
   if(gdYarnMap){Object.entries(yBal).forEach(([k,v])=>{if(k.endsWith("||"+f.godown)){const yt=k.split("||")[0];gdYarnMap[yt]=(v||0)+(yt===f.yarnType&&editId?origQty:0);}});}
@@ -899,7 +901,6 @@ function PIss({firm,M,parties,iss,inw,toast2,updM,fname,yBal}){
   const availKey=f.yarnType&&f.godown?f.yarnType+"||"+f.godown:null;
   const availStock=availKey?(yBal[availKey]||0):null;
   // For edit mode, add back the original qty so available shows pre-edit stock
-  const origQty=editId?+(iss.find(r=>r._id===editId)?.qty||0):0;
   const availForEdit=availStock!=null?(availStock+(editId?origQty:0)):null;
   const afterIssue=availForEdit!=null&&f.qty!==""?(availForEdit-(+f.qty||0)):null;
 
@@ -1510,6 +1511,8 @@ function PTrf({firm,M,parties,trf,pBal,yBal,toast2,updM,fname}){
   const ini={date:today(),yarnType:"",fromParty:"",toParty:"",qty:"",remarks:""};
   const[f,sf]=useState(ini),s=(k,v)=>sf(p=>({...p,[k]:v}));
 
+  // origQtyTrf must be declared before partyYarnMap uses it (edit mode adds back original qty)
+  const origQtyTrf=editId?+(trf.find(r=>r._id===editId)?.qty||0):0;
   // Yarns held by fromParty with qty (for yarn dropdown)
   const partyYarnMap=f.fromParty?{}:null;
   if(partyYarnMap){const py=(pBal[f.fromParty]||{});Object.entries(py).forEach(([yt,q])=>{partyYarnMap[yt]=(q||0)+(yt===f.yarnType&&editId?origQtyTrf:0);});}
@@ -1526,7 +1529,6 @@ function PTrf({firm,M,parties,trf,pBal,yBal,toast2,updM,fname}){
   const fromBal=f.fromParty&&f.yarnType?(pBal[f.fromParty]||{})[f.yarnType]||0:null;
   // Godown (un-issued) qty for same-name entity
   const fromGdBal=isOwnLoc&&f.yarnType?(yBal[f.yarnType+"||"+f.fromParty]||0):0;
-  const origQtyTrf=editId?+(trf.find(r=>r._id===editId)?.qty||0):0;
   const fromBalForEdit=fromBal!=null?(fromBal+(editId?origQtyTrf:0)):null;
   const afterTrf=fromBalForEdit!=null&&f.qty!==""?(fromBalForEdit-(+f.qty||0)):null;
 
