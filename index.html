@@ -253,6 +253,7 @@ const DEF={
   godowns:["Mill A","Mill B","Own Godown","Supplier X","Supplier Y"],
   weavers:["Ramesh Weaver","Suresh Loom","Karim Handloom","Ganesh Fabrics"],
   sizers:["Patel Sizing","Kumar Doubler","Singh Warp Prep"],
+  warpers:[],
   yarnRates:{},yarnMinStock:{},yarnDenierOverride:{},yarnSuppliers:[],yarnMills:[],yarnGrades:[],customers:[],pendingDays:15
 };
 
@@ -312,7 +313,7 @@ function App(){
   },[fab]);
 
   const updM=async(k,v)=>{const u={...M,[k]:v};setM(u);await mSave(firm,u)};
-  const parties=[...M.weavers.map(w=>({name:w,type:"weaver"})),...M.sizers.map(s=>({name:s,type:"sizer"}))];
+  const parties=[...M.weavers.map(w=>({name:w,type:"weaver"})),...M.sizers.map(s=>({name:s,type:"sizer"})),...((M.warpers||[]).map(w=>({name:w,type:"warper"})))];
 
   const yBal=useMemo(()=>{
     const b={};
@@ -944,7 +945,8 @@ function PIss({firm,M,parties,iss,inw,toast2,updM,fname,yBal}){
             h("option",{value:""},"Select..."),
             parties.filter(p=>M.godowns.includes(p.name)).length>0&&h("optgroup",{label:"🏭 Own locations"},parties.filter(p=>M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name+" (Own)"))),
             h("optgroup",{label:"Weavers"},parties.filter(p=>p.type==="weaver"&&!M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name))),
-            h("optgroup",{label:"Sizers"},parties.filter(p=>p.type==="sizer"&&!M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name)))
+            h("optgroup",{label:"Sizers"},parties.filter(p=>p.type==="sizer"&&!M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name))),
+            h("optgroup",{label:"Warpers"},parties.filter(p=>p.type==="warper"&&!M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name)))
           ),
           h(AddPartyInline,{firm,M,updM,defaultType:"weaver",onAdded:v=>pickP(v)})
         ))
@@ -1522,7 +1524,7 @@ function PTrf({firm,M,parties,trf,pBal,yBal,toast2,updM,fname}){
 
   // Live balance check for fromParty
   // Detect own-locations: same name in godowns AND any party source
-  const partyNames2=new Set([...(M.weavers||[]),...(M.sizers||[]),...parties.map(p=>p.name)]);
+  const partyNames2=new Set([...(M.weavers||[]),...(M.sizers||[]),...(M.warpers||[]),...parties.map(p=>p.name)]);
   const sharedNamesT=new Set((M.godowns||[]).filter(g=>partyNames2.has(g)));
   const isOwnLoc=f.fromParty&&sharedNamesT.has(f.fromParty);
   // Party-held qty (issued to them minus transfers out)
@@ -1554,7 +1556,8 @@ function PTrf({firm,M,parties,trf,pBal,yBal,toast2,updM,fname}){
             h("option",{value:""},"Select..."),
             parties.filter(p=>M.godowns.includes(p.name)).length>0&&h("optgroup",{label:"🏭 Own"},parties.filter(p=>M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name+" (Own)"))),
             h("optgroup",{label:"Weavers"},parties.filter(p=>p.type==="weaver"&&!M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name))),
-            h("optgroup",{label:"Sizers"},parties.filter(p=>p.type==="sizer"&&!M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name)))
+            h("optgroup",{label:"Sizers"},parties.filter(p=>p.type==="sizer"&&!M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name))),
+            h("optgroup",{label:"Warpers"},parties.filter(p=>p.type==="warper"&&!M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name)))
           ),
           h(AddPartyInline,{firm,M,updM,defaultType:"weaver",onAdded:v=>s("fromParty",v)})
         )),
@@ -1563,7 +1566,8 @@ function PTrf({firm,M,parties,trf,pBal,yBal,toast2,updM,fname}){
             h("option",{value:""},"Select..."),
             parties.filter(p=>M.godowns.includes(p.name)).length>0&&h("optgroup",{label:"🏭 Own"},parties.filter(p=>M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name+" (Own)"))),
             h("optgroup",{label:"Weavers"},parties.filter(p=>p.type==="weaver"&&!M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name))),
-            h("optgroup",{label:"Sizers"},parties.filter(p=>p.type==="sizer"&&!M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name)))
+            h("optgroup",{label:"Sizers"},parties.filter(p=>p.type==="sizer"&&!M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name))),
+            h("optgroup",{label:"Warpers"},parties.filter(p=>p.type==="warper"&&!M.godowns.includes(p.name)).map(p=>h("option",{key:p.name,value:p.name},p.name)))
           ),
           h(AddPartyInline,{firm,M,updM,defaultType:"weaver",onAdded:v=>s("toParty",v)})
         ))
@@ -2354,7 +2358,7 @@ function PMas({M,updM,toast2}){
       ))
     );
   }
-  const tabs=[{id:"yarn",l:"Yarn types"},{id:"grades",l:"🏷 Yarn Grades"},{id:"mills",l:"🏭 Mills"},{id:"suppliers",l:"Suppliers"},{id:"customers",l:"👥 Customers"},{id:"godowns",l:"Godowns"},{id:"weavers",l:"Weavers"},{id:"sizers",l:"Sizers"}];
+  const tabs=[{id:"yarn",l:"Yarn types"},{id:"grades",l:"🏷 Yarn Grades"},{id:"mills",l:"🏭 Mills"},{id:"suppliers",l:"Suppliers"},{id:"customers",l:"👥 Customers"},{id:"godowns",l:"Godowns"},{id:"weavers",l:"Weavers"},{id:"sizers",l:"Sizers"},{id:"warpers",l:"Warpers"}];
   return h("div",null,
     h("div",{style:{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}},tabs.map(t=>h("button",{key:t.id,className:"btn"+(tab===t.id?" btn-p":""),style:{height:32,fontSize:12},onClick:()=>setTab(t.id)},t.l))),
     tab==="yarn"&&h(YarnM,null),
@@ -2365,6 +2369,7 @@ function PMas({M,updM,toast2}){
     tab==="godowns"&&h(ML,{title:"Godowns / Mills",mk:"godowns",ic:"🏭"}),
     tab==="weavers"&&h(ML,{title:"Weavers",mk:"weavers",ic:"👤"}),
     tab==="sizers"&&h(ML,{title:"Sizers / Doublers",mk:"sizers",ic:"⚙"}),
+    tab==="warpers"&&h(ML,{title:"Warpers",mk:"warpers",ic:"🧵"}),
     h("div",{className:"card",style:{background:"var(--inb)",border:"1px solid #BDD8ED",marginTop:8}},h("p",{style:{fontSize:13,color:"var(--in)",lineHeight:1.6}},"💡 Masters are saved separately per firm. Set yarn rates to see stock value. Set minimum stock to get low stock alerts."))
   );
 }
@@ -3152,7 +3157,7 @@ function AddPartyInline({firm,M,updM,onAdded,defaultType}){
   const doAdd=async()=>{
     const t=name.trim();if(!t)return;
     // Add to Masters array
-    const mk=type==="sizer"?"sizers":"weavers";
+    const mk=type==="sizer"?"sizers":type==="warper"?"warpers":"weavers";
     await updM(mk,[...(M[mk]||[]),t]);
     // Add to Firestore parties collection
     await dbs(firm,"parties",uid(),{name:t,type});
@@ -3163,7 +3168,7 @@ function AddPartyInline({firm,M,updM,onAdded,defaultType}){
       onKeyDown:e=>{if(e.key==="Enter")doAdd();if(e.key==="Escape")setOpen(false);},
       placeholder:"Party name…",style:{flex:1,minWidth:120,height:30,fontSize:12,border:"2px solid var(--acc)"}}),
     h("select",{value:type,onChange:e=>setType(e.target.value),style:{height:30,fontSize:12}},
-      h("option",{value:"weaver"},"Weaver"),h("option",{value:"sizer"},"Sizer")
+      h("option",{value:"weaver"},"Weaver"),h("option",{value:"sizer"},"Sizer"),h("option",{value:"warper"},"Warper")
     ),
     h("button",{className:"btn btn-sm btn-p",onClick:doAdd},"✓ Add"),
     h("button",{className:"btn btn-sm",onClick:()=>setOpen(false)},"✕")
